@@ -211,6 +211,63 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
 .btn-inst-dismiss{width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:none;color:var(--text-dim);cursor:pointer;font-size:0.85rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 @media(min-width:480px){.slots-grid{display:grid;grid-template-columns:1fr 1fr;}}
 @media(min-width:768px){.slots-grid{grid-template-columns:repeat(3,1fr);}}
+
+/* ── RANGE CALENDAR PICKER ── */
+.range-picker-wrap{position:relative;margin-bottom:11px;}
+.range-display{
+  display:flex;align-items:center;gap:8px;
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius-xs);padding:9px 12px;cursor:pointer;
+  transition:border-color 0.2s;user-select:none;
+}
+.range-display:hover,.range-display.open{border-color:var(--accent);}
+.range-display-start,.range-display-end{
+  flex:1;font-size:0.84rem;font-weight:600;color:var(--text);text-align:center;
+}
+.range-display-start.empty,.range-display-end.empty{color:var(--text-dim);font-weight:400;}
+.range-arrow{color:var(--text-dim);font-size:0.8rem;flex-shrink:0;}
+.range-cal{
+  position:absolute;top:calc(100% + 6px);left:0;right:0;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:14px;
+  box-shadow:var(--shadow-lg);z-index:200;
+  display:none;
+}
+.range-cal.open{display:block;animation:fadeSlideD 0.18s ease;}
+@keyframes fadeSlideD{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.cal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.cal-nav{width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:none;
+  color:var(--text-mid);cursor:pointer;font-size:0.9rem;display:flex;align-items:center;justify-content:center;transition:all 0.15s;}
+.cal-nav:hover{border-color:var(--accent);color:var(--accent);}
+.cal-month{font-family:'Playfair Display',serif;font-size:0.95rem;font-weight:500;color:var(--text);}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}
+.cal-dow{text-align:center;font-size:0.62rem;font-weight:700;letter-spacing:0.06em;
+  text-transform:uppercase;color:var(--text-dim);padding:4px 0;}
+.cal-day{
+  text-align:center;padding:6px 2px;font-size:0.82rem;border-radius:6px;
+  cursor:pointer;transition:all 0.15s;color:var(--text-mid);position:relative;
+}
+.cal-day:hover:not(.cal-empty):not(.cal-past){background:var(--surface3);color:var(--text);}
+.cal-day.cal-empty{cursor:default;}
+.cal-day.cal-past{opacity:0.25;cursor:not-allowed;}
+.cal-day.cal-start{background:var(--accent)!important;color:white!important;border-radius:6px 0 0 6px;}
+.cal-day.cal-end{background:var(--accent)!important;color:white!important;border-radius:0 6px 6px 0;}
+.cal-day.cal-start.cal-end{border-radius:6px!important;}
+.cal-day.cal-in-range{background:var(--accent-glow);color:var(--text);border-radius:0;}
+.cal-day.cal-today{font-weight:700;color:var(--accent);}
+.cal-hint{font-size:0.72rem;color:var(--text-dim);text-align:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
+
+/* On deck banner */
+.on-deck-strip{
+  margin:8px 18px 0;
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:10px 14px;
+  display:flex;align-items:center;gap:10px;
+}
+.on-deck-lbl{font-size:0.63rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-dim);flex-shrink:0;}
+.on-deck-person{display:flex;align-items:center;gap:8px;flex:1;}
+.on-deck-av{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.65rem;font-weight:700;color:white;flex-shrink:0;}
+.on-deck-name{font-size:0.82rem;font-weight:600;color:var(--text-mid);}
 </style>
 </head>
 <body>
@@ -412,9 +469,14 @@ function renderSC(s,i){
       <input class="slot-name-inp" placeholder="e.g. Summer Week 1" value="${s.label}" oninput="W.slots[${i}].label=this.value">
       <button class="rm-btn" onclick="rmSlot(${i})">✕</button>
     </div>
-    <div class="date-row">
-      <div class="fld-grp"><div class="fld-lbl">Start</div><input type="date" value="${s.start}" oninput="W.slots[${i}].start=this.value"></div>
-      <div class="fld-grp"><div class="fld-lbl">End</div><input type="date" value="${s.end}" oninput="W.slots[${i}].end=this.value"></div>
+    <div class="fld-lbl" style="margin-bottom:6px;">Date Range</div>
+    <div class="range-picker-wrap" id="rpWrap${i}">
+      <div class="range-display" id="rpDisplay${i}" onclick="toggleCal(${i})">
+        <div class="range-display-start ${s.start ? '' : 'empty'}" id="rpStart${i}">${s.start ? fmtCalDisplay(s.start) : 'Start date'}</div>
+        <div class="range-arrow">→</div>
+        <div class="range-display-end ${s.end ? '' : 'empty'}" id="rpEnd${i}">${s.end ? fmtCalDisplay(s.end) : 'End date'}</div>
+      </div>
+      <div class="range-cal" id="rpCal${i}"></div>
     </div>
     <div class="max-row">
       <div class="max-lbl">Max people</div>
@@ -731,6 +793,16 @@ function renderBoard(){
   if(done){
     ba.innerHTML=`<div class="complete-banner"><h2>🏖 Draft Complete!</h2><p>All vacation periods are filled. Check your email for the full schedule.</p></div>`;
   }else if(!isRO()&&curP){
+    const nextPIdx2=pAtIdx(cpi+1);
+    const nextP2=S.participants[nextPIdx2];
+    const onDeckHtml=(!done&&nextP2&&nextP2.name!==curP.name)?`
+      <div class="on-deck-strip">
+        <div class="on-deck-lbl">On Deck</div>
+        <div class="on-deck-person">
+          <div class="on-deck-av" style="background:${nextP2.color||'#888'}">${nextP2.name?.[0]||'?'}</div>
+          <div class="on-deck-name">${nextP2.name}</div>
+        </div>
+      </div>`:'';
     ba.innerHTML=`<div class="turn-banner">
       <div class="t-lbl">Now Drafting</div>
       <div class="t-person">
@@ -738,9 +810,19 @@ function renderBoard(){
         <div><div class="t-name">${curP.name||'—'}</div><div class="t-sub">Round ${rnd} · Pick ${pip} of ${n}</div></div>
       </div>
       <div class="t-actions"><button class="btn-skip" onclick="skipTurn()">⏭ Skip my turn</button></div>
-    </div>`;
+    </div>${onDeckHtml}`;
   }else if(curP){
-    ba.innerHTML=`<div class="ro-banner"><span style="font-size:1.1rem">👁</span><span>Watching — it's <strong>${curP.name}'s</strong> turn. Check your email when it's yours.</span></div>`;
+    const nextPIdx2=pAtIdx(cpi+1);
+    const nextP2=S.participants[nextPIdx2];
+    const onDeckHtml=(!done&&nextP2&&nextP2.name!==curP.name)?`
+      <div class="on-deck-strip">
+        <div class="on-deck-lbl">On Deck</div>
+        <div class="on-deck-person">
+          <div class="on-deck-av" style="background:${nextP2.color||'#888'}">${nextP2.name?.[0]||'?'}</div>
+          <div class="on-deck-name">${nextP2.name}</div>
+        </div>
+      </div>`:'';
+    ba.innerHTML=`<div class="ro-banner"><span style="font-size:1.1rem">👁</span><span>Watching — it's <strong>${curP.name}'s</strong> turn. Check your email when it's yours.</span></div>${onDeckHtml}`;
   }
 
   // Slots
@@ -957,6 +1039,147 @@ async function init(){
 }
 
 init();
+
+// ── RANGE CALENDAR PICKER ──
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DAYS=['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+let calState={}; // {slotIdx: {year, month, selecting:'start'|'end'}}
+
+function fmtCalDisplay(d){
+  if(!d)return'';
+  const dt=new Date(d+'T12:00:00');
+  return dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+}
+
+function toggleCal(i){
+  const cal=document.getElementById('rpCal'+i);
+  const disp=document.getElementById('rpDisplay'+i);
+  const isOpen=cal.classList.contains('open');
+  // Close all other calendars
+  document.querySelectorAll('.range-cal.open').forEach(el=>el.classList.remove('open'));
+  document.querySelectorAll('.range-display.open').forEach(el=>el.classList.remove('open'));
+  if(!isOpen){
+    // Init state
+    const s=W.slots[i];
+    const now=new Date();
+    calState[i]={
+      year: s.start ? parseInt(s.start.split('-')[0]) : now.getFullYear(),
+      month: s.start ? parseInt(s.start.split('-')[1])-1 : now.getMonth(),
+      selecting: s.start ? 'end' : 'start',
+    };
+    cal.classList.add('open');
+    disp.classList.add('open');
+    renderCal(i);
+  }
+}
+
+function renderCal(i){
+  const cal=document.getElementById('rpCal'+i);
+  if(!cal)return;
+  const {year,month,selecting}=calState[i];
+  const s=W.slots[i];
+  const today=new Date();today.setHours(0,0,0,0);
+
+  // Build day cells
+  const firstDay=new Date(year,month,1).getDay();
+  const daysInMonth=new Date(year,month+1,0).getDate();
+
+  let cells='';
+  // Day of week headers
+  cells+=DAYS.map(d=>`<div class="cal-dow">${d}</div>`).join('');
+  // Empty cells before first day
+  for(let e=0;e<firstDay;e++) cells+=`<div class="cal-day cal-empty"></div>`;
+  // Day cells
+  for(let d=1;d<=daysInMonth;d++){
+    const dateStr=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dt=new Date(year,month,d);
+    const isPast=dt<today;
+    const isStart=s.start===dateStr;
+    const isEnd=s.end===dateStr;
+    const inRange=s.start&&s.end&&dateStr>s.start&&dateStr<s.end;
+    const isToday=dt.toDateString()===today.toDateString();
+    let cls='cal-day';
+    if(isPast)cls+=' cal-past';
+    if(isStart)cls+=' cal-start';
+    if(isEnd)cls+=' cal-end';
+    if(inRange)cls+=' cal-in-range';
+    if(isToday&&!isStart&&!isEnd)cls+=' cal-today';
+    const onclick=isPast?'':`onclick="calPickDay(${i},'${dateStr}')"`;
+    cells+=`<div class="${cls}" ${onclick}>${d}</div>`;
+  }
+
+  const hint=selecting==='start'?'Tap a start date':'Tap an end date';
+  cal.innerHTML=`
+    <div class="cal-header">
+      <button class="cal-nav" onclick="calNav(${i},-1)">‹</button>
+      <div class="cal-month">${MONTHS[month]} ${year}</div>
+      <button class="cal-nav" onclick="calNav(${i},1)">›</button>
+    </div>
+    <div class="cal-grid">${cells}</div>
+    <div class="cal-hint">${hint}</div>
+  `;
+}
+
+function calNav(i,dir){
+  const st=calState[i];
+  st.month+=dir;
+  if(st.month>11){st.month=0;st.year++;}
+  if(st.month<0){st.month=11;st.year--;}
+  renderCal(i);
+}
+
+function calPickDay(i,dateStr){
+  const st=calState[i];
+  const s=W.slots[i];
+
+  if(st.selecting==='start'){
+    s.start=dateStr;
+    s.end=''; // reset end when start changes
+    st.selecting='end';
+  } else {
+    // If picked before start, swap to start
+    if(dateStr<=s.start){
+      s.start=dateStr;
+      s.end='';
+      st.selecting='end';
+    } else {
+      s.end=dateStr;
+      // Close calendar after both picked
+      setTimeout(()=>{
+        const cal=document.getElementById('rpCal'+i);
+        const disp=document.getElementById('rpDisplay'+i);
+        if(cal)cal.classList.remove('open');
+        if(disp)disp.classList.remove('open');
+      },300);
+    }
+  }
+
+  // Update display
+  const startEl=document.getElementById('rpStart'+i);
+  const endEl=document.getElementById('rpEnd'+i);
+  if(startEl){
+    startEl.textContent=s.start?fmtCalDisplay(s.start):'Start date';
+    startEl.classList.toggle('empty',!s.start);
+  }
+  if(endEl){
+    endEl.textContent=s.end?fmtCalDisplay(s.end):'End date';
+    endEl.classList.toggle('empty',!s.end);
+  }
+
+  // Update max stepper display if days shown
+  renderCal(i);
+}
+
+// Close calendars when clicking outside
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.range-picker-wrap')){
+    document.querySelectorAll('.range-cal.open').forEach(el=>el.classList.remove('open'));
+    document.querySelectorAll('.range-display.open').forEach(el=>el.classList.remove('open'));
+  }
+});
+
+// Helper so renderSC can call fmtCalDisplay at render time
 </script>
 <script>
 if ('serviceWorker' in navigator) {
@@ -964,6 +1187,147 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').then(r => console.log('SW registered')).catch(e => console.log('SW error', e));
   });
 }
+
+// ── RANGE CALENDAR PICKER ──
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DAYS=['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+let calState={}; // {slotIdx: {year, month, selecting:'start'|'end'}}
+
+function fmtCalDisplay(d){
+  if(!d)return'';
+  const dt=new Date(d+'T12:00:00');
+  return dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+}
+
+function toggleCal(i){
+  const cal=document.getElementById('rpCal'+i);
+  const disp=document.getElementById('rpDisplay'+i);
+  const isOpen=cal.classList.contains('open');
+  // Close all other calendars
+  document.querySelectorAll('.range-cal.open').forEach(el=>el.classList.remove('open'));
+  document.querySelectorAll('.range-display.open').forEach(el=>el.classList.remove('open'));
+  if(!isOpen){
+    // Init state
+    const s=W.slots[i];
+    const now=new Date();
+    calState[i]={
+      year: s.start ? parseInt(s.start.split('-')[0]) : now.getFullYear(),
+      month: s.start ? parseInt(s.start.split('-')[1])-1 : now.getMonth(),
+      selecting: s.start ? 'end' : 'start',
+    };
+    cal.classList.add('open');
+    disp.classList.add('open');
+    renderCal(i);
+  }
+}
+
+function renderCal(i){
+  const cal=document.getElementById('rpCal'+i);
+  if(!cal)return;
+  const {year,month,selecting}=calState[i];
+  const s=W.slots[i];
+  const today=new Date();today.setHours(0,0,0,0);
+
+  // Build day cells
+  const firstDay=new Date(year,month,1).getDay();
+  const daysInMonth=new Date(year,month+1,0).getDate();
+
+  let cells='';
+  // Day of week headers
+  cells+=DAYS.map(d=>`<div class="cal-dow">${d}</div>`).join('');
+  // Empty cells before first day
+  for(let e=0;e<firstDay;e++) cells+=`<div class="cal-day cal-empty"></div>`;
+  // Day cells
+  for(let d=1;d<=daysInMonth;d++){
+    const dateStr=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dt=new Date(year,month,d);
+    const isPast=dt<today;
+    const isStart=s.start===dateStr;
+    const isEnd=s.end===dateStr;
+    const inRange=s.start&&s.end&&dateStr>s.start&&dateStr<s.end;
+    const isToday=dt.toDateString()===today.toDateString();
+    let cls='cal-day';
+    if(isPast)cls+=' cal-past';
+    if(isStart)cls+=' cal-start';
+    if(isEnd)cls+=' cal-end';
+    if(inRange)cls+=' cal-in-range';
+    if(isToday&&!isStart&&!isEnd)cls+=' cal-today';
+    const onclick=isPast?'':`onclick="calPickDay(${i},'${dateStr}')"`;
+    cells+=`<div class="${cls}" ${onclick}>${d}</div>`;
+  }
+
+  const hint=selecting==='start'?'Tap a start date':'Tap an end date';
+  cal.innerHTML=`
+    <div class="cal-header">
+      <button class="cal-nav" onclick="calNav(${i},-1)">‹</button>
+      <div class="cal-month">${MONTHS[month]} ${year}</div>
+      <button class="cal-nav" onclick="calNav(${i},1)">›</button>
+    </div>
+    <div class="cal-grid">${cells}</div>
+    <div class="cal-hint">${hint}</div>
+  `;
+}
+
+function calNav(i,dir){
+  const st=calState[i];
+  st.month+=dir;
+  if(st.month>11){st.month=0;st.year++;}
+  if(st.month<0){st.month=11;st.year--;}
+  renderCal(i);
+}
+
+function calPickDay(i,dateStr){
+  const st=calState[i];
+  const s=W.slots[i];
+
+  if(st.selecting==='start'){
+    s.start=dateStr;
+    s.end=''; // reset end when start changes
+    st.selecting='end';
+  } else {
+    // If picked before start, swap to start
+    if(dateStr<=s.start){
+      s.start=dateStr;
+      s.end='';
+      st.selecting='end';
+    } else {
+      s.end=dateStr;
+      // Close calendar after both picked
+      setTimeout(()=>{
+        const cal=document.getElementById('rpCal'+i);
+        const disp=document.getElementById('rpDisplay'+i);
+        if(cal)cal.classList.remove('open');
+        if(disp)disp.classList.remove('open');
+      },300);
+    }
+  }
+
+  // Update display
+  const startEl=document.getElementById('rpStart'+i);
+  const endEl=document.getElementById('rpEnd'+i);
+  if(startEl){
+    startEl.textContent=s.start?fmtCalDisplay(s.start):'Start date';
+    startEl.classList.toggle('empty',!s.start);
+  }
+  if(endEl){
+    endEl.textContent=s.end?fmtCalDisplay(s.end):'End date';
+    endEl.classList.toggle('empty',!s.end);
+  }
+
+  // Update max stepper display if days shown
+  renderCal(i);
+}
+
+// Close calendars when clicking outside
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.range-picker-wrap')){
+    document.querySelectorAll('.range-cal.open').forEach(el=>el.classList.remove('open'));
+    document.querySelectorAll('.range-display.open').forEach(el=>el.classList.remove('open'));
+  }
+});
+
+// Helper so renderSC can call fmtCalDisplay at render time
 </script>
 </body>
 </html>
