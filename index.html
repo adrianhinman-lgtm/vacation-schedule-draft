@@ -237,7 +237,7 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
   <div class="wiz-header">
     <div class="wiz-header-row">
       <div class="wiz-logo">Vacation <em>Draft</em></div>
-      <div class="wiz-step-txt" id="stepTxt">Step 1 of 3</div>
+      <div class="wiz-step-txt" id="stepTxt">Step 1 of 4</div>
     </div>
     <div class="prog-track"><div class="prog-fill" id="progFill" style="width:33%"></div></div>
   </div>
@@ -347,6 +347,7 @@ let W={
   slots:[{label:'',start:'',end:'',max:4},{label:'',start:'',end:'',max:4},{label:'',start:'',end:'',max:4},{label:'',start:'',end:'',max:4},{label:'',start:'',end:'',max:4}],
   participants:[{name:'',email:''},{name:'',email:''},{name:'',email:''}],
   adminEmail:'',draftName:'',
+  exclusionGroups:[], // [{name:'', maxPicks:1, slotIndices:[]}]
 };
 
 // ── SCREENS ──
@@ -356,19 +357,20 @@ function showJoin(){showScreen('joinScreen');}
 
 // ── WIZARD ──
 function renderStep(){
-  const pct=(W.step/3)*100;
+  const pct=(W.step/4)*100;
   document.getElementById('progFill').style.width=pct+'%';
-  document.getElementById('stepTxt').textContent=`Step ${W.step} of 3`;
+  document.getElementById('stepTxt').textContent=`Step ${W.step} of 4`;
   document.getElementById('btnBack').style.display=W.step===1?'none':'';
-  document.getElementById('btnNext').textContent=W.step===3?'🏝 Launch Draft':'Next →';
+  document.getElementById('btnNext').textContent=W.step===4?'🏝 Launch Draft':'Next →';
   const body=document.getElementById('wizBody');
   if(W.step===1)body.innerHTML=renderS1();
   if(W.step===2)body.innerHTML=renderS2();
-  if(W.step===3)body.innerHTML=renderS3();
+  if(W.step===4)body.innerHTML=renderS4();
+  if(W.step===4)body.innerHTML=renderS4();
 }
 
 function wizBack(){if(W.step>1){W.step--;renderStep();}else showScreen('landingScreen');}
-function wizNext(){if(!validate())return;if(W.step<3){W.step++;renderStep();}else launchDraft();}
+function wizNext(){if(!validate())return;if(W.step<4){W.step++;renderStep();}else launchDraft();}
 
 function validate(){
   if(W.step===1){
@@ -378,12 +380,14 @@ function validate(){
     if(bad){showToast(`"${bad.label}": end must be after start`,'error');return false;}
     return true;
   }
-  if(W.step===2){
+  if(W.step===2){return true;} // exclusions step — always optional
+  if(W.step===3){
+    // participants step — same as old step 2
     const named=W.participants.filter(p=>p.name.trim());
     if(named.length<2){showToast('Add at least 2 participants','error');return false;}
     return true;
   }
-  if(W.step===3){
+  if(W.step===4){
     if(!W.draftName.trim()){showToast('Enter a draft name','error');return false;}
     if(!W.adminEmail.includes('@')){showToast('Enter a valid admin email','error');return false;}
     return true;
@@ -426,8 +430,86 @@ function addSlot(){W.slots.push({label:'',start:'',end:'',max:4});document.getEl
 function rmSlot(i){if(W.slots.length<=1){showToast('Need at least one slot','error');return;}W.slots.splice(i,1);document.getElementById('wizSlots').innerHTML=W.slots.map((s,i)=>renderSC(s,i)).join('');}
 function chMax(i,d){W.slots[i].max=Math.max(1,Math.min(50,(W.slots[i].max||4)+d));const el=document.getElementById('mv'+i);if(el)el.textContent=W.slots[i].max;}
 
-// S2: PARTICIPANTS
+
+// S2: EXCLUSION GROUPS
 function renderS2(){
+  const hasSlots = W.slots.filter(s=>s.label.trim()).length > 1;
+  if(!hasSlots) return `<div class="step-title">Mutual <em>Exclusions</em></div><p class="step-sub">Add at least 2 date periods in Step 1 to set up exclusion rules.</p>`;
+
+  const validSlots = W.slots.filter(s=>s.label.trim());
+
+  return `<div class="step-title">Mutual <em>Exclusions</em></div>
+<p class="step-sub">Optional — if selecting one period should prevent someone from also selecting another, group them here. For example, Christmas Week and New Year's Week might be mutually exclusive.</p>
+<div class="info-chip">✦ Skip this step if all periods are independent</div>
+<div id="exclGroups">${W.exclusionGroups.map((g,i)=>renderEG(g,i,validSlots)).join('')}</div>
+<button class="add-btn" onclick="addEG()">＋ Add exclusion group</button>
+<div style="margin-top:20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;">
+  <div style="font-size:0.78rem;color:var(--text-mid);line-height:1.6;">
+    <strong style="color:var(--accent)">Example</strong><br><br>
+    Group: "Holiday Weeks"<br>
+    Includes: Christmas Week + New Year's Week<br>
+    Max picks: 1<br><br>
+    → Each person can only select <em>one</em> of those two weeks.
+  </div>
+</div>`;
+}
+
+function renderEG(g, i, validSlots){
+  const slotOptions = validSlots.map((s,si)=>{
+    const realIdx = W.slots.indexOf(s);
+    const checked = g.slotIndices.includes(realIdx) ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:0.85rem;color:var(--text-mid);transition:background 0.15s;" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='none'">
+      <input type="checkbox" ${checked} onchange="toggleSlot(${i},${realIdx},this.checked)" style="accent-color:var(--accent);width:16px;height:16px;cursor:pointer;">
+      ${s.label}
+    </label>`;
+  }).join('');
+
+  return `<div class="slot-card" style="margin-bottom:12px;">
+    <div class="slot-hdr">
+      <div class="slot-num">${i+1}</div>
+      <input class="slot-name-inp" placeholder="Group name (e.g. Holiday Weeks)" value="${g.name}" oninput="W.exclusionGroups[${i}].name=this.value">
+      <button class="rm-btn" onclick="rmEG(${i})">✕</button>
+    </div>
+    <div style="margin-bottom:12px;">
+      <div class="fld-lbl" style="margin-bottom:8px;">Select which periods are mutually exclusive:</div>
+      <div style="display:flex;flex-direction:column;gap:2px;background:var(--surface2);border-radius:8px;padding:4px;">${slotOptions}</div>
+    </div>
+    <div class="max-row">
+      <div class="max-lbl">Max picks allowed per person from this group</div>
+      <div class="stepper">
+        <button class="step-btn" onclick="chEGMax(${i},-1)">−</button>
+        <div class="max-val" id="egmv${i}">${g.maxPicks}</div>
+        <button class="step-btn" onclick="chEGMax(${i},1)">+</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function addEG(){
+  W.exclusionGroups.push({name:'',maxPicks:1,slotIndices:[]});
+  const validSlots=W.slots.filter(s=>s.label.trim());
+  document.getElementById('exclGroups').innerHTML=W.exclusionGroups.map((g,i)=>renderEG(g,i,validSlots)).join('');
+}
+
+function rmEG(i){
+  W.exclusionGroups.splice(i,1);
+  const validSlots=W.slots.filter(s=>s.label.trim());
+  document.getElementById('exclGroups').innerHTML=W.exclusionGroups.map((g,i)=>renderEG(g,i,validSlots)).join('');
+}
+
+function toggleSlot(groupIdx, slotIdx, checked){
+  const g=W.exclusionGroups[groupIdx];
+  if(checked){if(!g.slotIndices.includes(slotIdx))g.slotIndices.push(slotIdx);}
+  else{g.slotIndices=g.slotIndices.filter(i=>i!==slotIdx);}
+}
+
+function chEGMax(i,d){
+  W.exclusionGroups[i].maxPicks=Math.max(1,Math.min(10,(W.exclusionGroups[i].maxPicks||1)+d));
+  const el=document.getElementById('egmv'+i);if(el)el.textContent=W.exclusionGroups[i].maxPicks;
+}
+
+// S3: PARTICIPANTS
+function renderS3(){
   return `<div class="step-title">Who's <em>participating?</em></div>
 <p class="step-sub">Add everyone joining. Round 1 goes in this order (1→N), then reverses each round.</p>
 <div class="info-chip">✦ Order here = Round 1 draft order</div>
@@ -454,8 +536,8 @@ function upAv(i){const el=document.getElementById('pav'+i);if(el)el.textContent=
 function addP(){W.participants.push({name:'',email:''});document.getElementById('wizPeople').innerHTML=W.participants.map((p,i)=>renderPC(p,i)).join('');}
 function rmP(i){if(W.participants.length<=2){showToast('Need at least 2','error');return;}W.participants.splice(i,1);document.getElementById('wizPeople').innerHTML=W.participants.map((p,i)=>renderPC(p,i)).join('');}
 
-// S3: SETTINGS
-function renderS3(){
+// S4: SETTINGS
+function renderS4(){
   return `<div class="step-title">Almost <em>ready!</em></div>
 <p class="step-sub">Two quick details and your draft is live.</p>
 <div class="s-grp"><label class="s-lbl">Draft Name</label><input type="text" class="s-inp" placeholder="e.g. Team Vacation Draft 2027" value="${W.draftName}" oninput="W.draftName=this.value"></div>
@@ -479,11 +561,13 @@ async function launchDraft(){
     const n=validPeople.length;
     const baseOrder=shuffle([...Array(n).keys()]);
 
+    const validExclGroups=W.exclusionGroups.filter(g=>g.slotIndices.length>=2);
     const [draft]=await sb.post('drafts',{
       code,name:W.draftName.trim(),admin_email:W.adminEmail.trim(),
       base_order:JSON.stringify(baseOrder),
       current_pick_index:0,total_picks:0,launched:true,completion_sent:false,
       current_token:genToken(0),turn_started_at:new Date().toISOString(),
+      exclusion_groups:JSON.stringify(validExclGroups),
     });
 
     for(let i=0;i<validSlots.length;i++){
@@ -564,8 +648,27 @@ function canP(pi){
   return S.slots.some(sl=>{
     const cnt=S.claims.filter(c=>c.slot_id===sl.id).length;
     const mine=S.claims.some(c=>c.slot_id===sl.id&&c.participant_index===pi);
-    return cnt<sl.max_people&&!mine;
+    const blocked=isExcBlocked(sl,pi);
+    return cnt<sl.max_people&&!mine&&!blocked;
   });
+}
+
+function isExcBlocked(slot,pi){
+  if(!S.draft?.exclusion_groups)return false;
+  let groups=[];
+  try{groups=JSON.parse(S.draft.exclusion_groups||'[]');}catch(e){return false;}
+  // Find slot index in S.slots
+  const slotIdx=S.slots.findIndex(s=>s.id===slot.id);
+  for(const g of groups){
+    if(!g.slotIndices.includes(slotIdx))continue;
+    // Count how many of this group's slots the person has already claimed
+    const pickedInGroup=g.slotIndices.filter(si=>{
+      const sl2=S.slots[si];
+      return sl2&&S.claims.some(c=>c.slot_id===sl2.id&&c.participant_index===pi);
+    }).length;
+    if(pickedInGroup>=g.maxPicks)return true;
+  }
+  return false;
 }
 function isValidTok(){
   const ut=getTok();
@@ -623,16 +726,17 @@ function renderBoard(){
     const slC=S.claims.filter(c=>c.slot_id===sl.id);
     const full=slC.length>=sl.max_people;
     const mine=!done&&slC.some(c=>c.participant_index===cpi_part);
-    const canSel=!isRO()&&!done&&!full&&!mine;
+    const excBlocked=!done&&!mine&&!full&&isExcBlocked(sl,cpi_part);
+    const canSel=!isRO()&&!done&&!full&&!mine&&!excBlocked;
     let cls='d-slot';
-    if(mine)cls+=' claimed';else if(full)cls+=' full';else if(!done&&!isRO())cls+=' avail';
+    if(mine)cls+=' claimed';else if(full)cls+=' full';else if(excBlocked)cls+=' blocked';else if(!done&&!isRO())cls+=' avail';
     const spots=[...Array(sl.max_people)].map((_,i)=>{
       if(i<slC.length){const pp=S.participants[slC[i].participant_index];return`<div class="spot filled" style="background:${pp?.color||'#888'};border-color:transparent">${pp?.name?.[0]||'?'}</div>`;}
       return`<div class="spot empty">+</div>`;
     }).join('');
     const rem=sl.max_people-slC.length;
-    const sc=full?'var(--text-dim)':mine?'var(--teal)':rem===1?'var(--accent)':'var(--teal)';
-    const st=full?'Full':mine?'✓ Claimed':`${rem} spot${rem!==1?'s':''} left`;
+    const sc=full?'var(--text-dim)':mine?'var(--teal)':excBlocked?'var(--text-dim)':rem===1?'var(--accent)':'var(--teal)';
+    const st=full?'Full':mine?'✓ Claimed':excBlocked?'Not available (exclusion)': `${rem} spot${rem!==1?'s':''} left`;
     const mb=sl.max_people>4?`<div class="max-badge">★ ${sl.max_people}</div>`:'';
     return`<div class="${cls}" onclick="${canSel?`openModal('${sl.id}')`:''}" style="${full||(!canSel&&!mine)?'':'cursor:pointer'}">
       ${mb}
@@ -662,6 +766,7 @@ function openModal(slotId){
   const cpi_p=pAtIdx(cpi);const curP=S.participants[cpi_p];
   const nextPi=pAtIdx(cpi+1);const nextP=S.participants[nextPi];
   const slC=S.claims.filter(c=>c.slot_id===slotId);
+  if(isExcBlocked(sl, pAtIdx(S.draft.current_pick_index))){showToast('This period is excluded — you already picked from this group','error');return;}
   S.pendingSlotId=slotId;
   document.getElementById('mSub').textContent=`${curP?.name} is claiming a vacation period`;
   document.getElementById('mSlotNm').textContent=sl.label;
