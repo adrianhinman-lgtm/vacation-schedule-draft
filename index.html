@@ -348,6 +348,7 @@ let W={
   participants:[{name:'',email:''},{name:'',email:''},{name:'',email:''}],
   adminEmail:'',draftName:'',
   exclusionGroups:[], // [{name:'', maxPicks:1, slotIndices:[]}]
+  randomizeOrder:false,
 };
 
 // ── SCREENS ──
@@ -510,11 +511,31 @@ function chEGMax(i,d){
 
 // S3: PARTICIPANTS
 function renderS3(){
+  const chipText = W.randomizeOrder ? '✦ Order will be randomized at launch' : '✦ Order here = Round 1 draft order';
   return `<div class="step-title">Who's <em>participating?</em></div>
-<p class="step-sub">Add everyone joining. Round 1 goes in this order (1→N), then reverses each round.</p>
-<div class="info-chip">✦ Order here = Round 1 draft order</div>
+<p class="step-sub">Add everyone joining. The draft will follow the exact order names are entered here — person #1 picks first in Round 1, person #2 picks second, and so on. If you'd prefer a random order, use the <strong style="color:var(--accent)">Randomize order</strong> toggle below.</p>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:12px;">
+  <div class="info-chip" id="orderChip" style="margin-bottom:0">${chipText}</div>
+  <button onclick="toggleRandomize()" id="randBtn" style="
+    display:flex;align-items:center;gap:8px;padding:7px 14px;
+    border:1.5px solid ${W.randomizeOrder ? 'var(--accent)' : 'var(--border-light)'};
+    border-radius:20px;background:${W.randomizeOrder ? 'var(--accent-glow)' : 'none'};
+    color:${W.randomizeOrder ? 'var(--accent)' : 'var(--text-dim)'};
+    font-family:'Plus Jakarta Sans',sans-serif;font-size:0.78rem;font-weight:700;
+    cursor:pointer;transition:all 0.2s;flex-shrink:0;
+  ">
+    <span style="font-size:1rem">${W.randomizeOrder ? '🎲' : '🔢'}</span>
+    ${W.randomizeOrder ? 'Randomized' : 'Randomize order'}
+  </button>
+</div>
 <div id="wizPeople">${W.participants.map((p,i)=>renderPC(p,i)).join('')}</div>
 <button class="add-btn" onclick="addP()">＋ Add participant</button>`;
+}
+
+function toggleRandomize(){
+  W.randomizeOrder = !W.randomizeOrder;
+  // Re-render just the toggle button and chip without full step re-render
+  document.getElementById('wizBody').innerHTML = renderS3();
 }
 
 function renderPC(p,i){
@@ -559,7 +580,8 @@ async function launchDraft(){
     const validSlots=W.slots.filter(s=>s.label.trim()&&s.start&&s.end);
     const validPeople=W.participants.filter(p=>p.name.trim());
     const n=validPeople.length;
-    const baseOrder=shuffle([...Array(n).keys()]);
+    const baseOrder = W.randomizeOrder ? shuffle([...Array(n).keys()]) : [...Array(n).keys()];
+    console.log('Draft order:', W.randomizeOrder ? 'randomized' : 'as entered', baseOrder);
 
     const validExclGroups=W.exclusionGroups.filter(g=>g.slotIndices.length>=2);
     const [draft]=await sb.post('drafts',{
