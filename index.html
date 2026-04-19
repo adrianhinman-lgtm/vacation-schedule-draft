@@ -1040,6 +1040,1173 @@ async function init(){
 
 init();
 
+
+// ── RANGE CALENDAR PICKER ──
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DAYS=['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+// calState: {slotIdx: {year, month, selecting:'start'|'end'}}
+let calState={};
+let calOpenIdx=null; // track which calendar is open
+
+function fmtCalDisplay(d){
+  if(!d)return'';
+  const dt=new Date(d+'T12:00:00');
+  return dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+}
+
+function toggleCal(i){
+  const cal=document.getElementById('rpCal'+i);
+  const disp=document.getElementById('rpDisplay'+i);
+  if(!cal||!disp)return;
+  const isOpen=calOpenIdx===i;
+  // Close whichever is open
+  closeAllCals();
+  if(!isOpen){
+    const s=W.slots[i];
+    const now=new Date();
+    calState[i]={
+      year: s.start ? parseInt(s.start.split('-')[0]) : now.getFullYear(),
+      month: s.start ? parseInt(s.start.split('-')[1])-1 : now.getMonth(),
+      selecting: s.start&&!s.end ? 'end' : 'start',
+    };
+    calOpenIdx=i;
+    cal.classList.add('open');
+    disp.classList.add('open');
+    renderCal(i);
+  }
+}
+
+function closeAllCals(){
+  document.querySelectorAll('.range-cal').forEach(el=>el.classList.remove('open'));
+  document.querySelectorAll('.range-display').forEach(el=>el.classList.remove('open'));
+  calOpenIdx=null;
+}
+
+function calNav(i,dir,event){
+  // Stop propagation so outside-click handler doesn't fire
+  if(event){event.stopPropagation();event.preventDefault();}
+  if(!calState[i])return;
+  const st=calState[i];
+  st.month+=dir;
+  if(st.month>11){st.month=0;st.year++;}
+  if(st.month<0){st.month=11;st.year--;}
+  renderCal(i);
+}
+
+function renderCal(i){
+  const cal=document.getElementById('rpCal'+i);
+  if(!cal)return;
+  // Make sure it stays open during re-render
+  cal.classList.add('open');
+  const {year,month,selecting}=calState[i];
+  const s=W.slots[i];
+  const today=new Date();today.setHours(0,0,0,0);
+  const firstDay=new Date(year,month,1).getDay();
+  const daysInMonth=new Date(year,month+1,0).getDate();
+
+  let cells='';
+  cells+=DAYS.map(d=>`<div class="cal-dow">${d}</div>`).join('');
+  for(let e=0;e<firstDay;e++) cells+=`<div class="cal-day cal-empty"></div>`;
+  for(let d=1;d<=daysInMonth;d++){
+    const dateStr=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dt=new Date(year,month,d);
+    const isPast=dt<today;
+    const isStart=s.start===dateStr;
+    const isEnd=s.end===dateStr;
+    const inRange=s.start&&s.end&&dateStr>s.start&&dateStr<s.end;
+    const isToday=dt.toDateString()===today.toDateString();
+    let cls='cal-day';
+    if(isPast)cls+=' cal-past';
+    if(isStart)cls+=' cal-start';
+    if(isEnd)cls+=' cal-end';
+    if(inRange)cls+=' cal-in-range';
+    if(isToday&&!isStart&&!isEnd)cls+=' cal-today';
+    // Use onmousedown instead of onclick to fire before blur/outside-click
+    const handler=isPast?'':`onmousedown="calPickDay(${i},'${dateStr}',event)"`;
+    cells+=`<div class="${cls}" ${handler}>${d}</div>`;
+  }
+
+  const hint=selecting==='start'?'Tap a start date':'Now tap an end date';
+  // Use onmousedown on nav buttons to prevent outside-click from firing
+  cal.innerHTML=`
+    <div class="cal-header">
+      <button class="cal-nav" onmousedown="calNav(${i},-1,event)">‹</button>
+      <div class="cal-month">${MONTHS[month]} ${year}</div>
+      <button class="cal-nav" onmousedown="calNav(${i},1,event)">›</button>
+    </div>
+    <div class="cal-grid">${cells}</div>
+    <div class="cal-hint">${hint}</div>
+  `;
+}
+
+function calPickDay(i,dateStr,event){
+  if(event){event.stopPropagation();event.preventDefault();}
+  const st=calState[i];
+  const s=W.slots[i];
+
+  if(st.selecting==='start'){
+    s.start=dateStr;
+    s.end='';
+    st.selecting='end';
+    updateRpDisplay(i);
+    renderCal(i); // stay open, waiting for end date
+  } else {
+    if(dateStr<=s.start){
+      // Picked before start — reset to new start
+      s.start=dateStr;
+      s.end='';
+      st.selecting='end';
+      updateRpDisplay(i);
+      renderCal(i);
+    } else {
+      s.end=dateStr;
+      updateRpDisplay(i);
+      // Small delay so user sees the selection before closing
+      setTimeout(()=>closeAllCals(), 350);
+    }
+  }
+}
+
+function updateRpDisplay(i){
+  const s=W.slots[i];
+  const startEl=document.getElementById('rpStart'+i);
+  const endEl=document.getElementById('rpEnd'+i);
+  if(startEl){
+    startEl.textContent=s.start?fmtCalDisplay(s.start):'Start date';
+    startEl.classList.toggle('empty',!s.start);
+  }
+  if(endEl){
+    endEl.textContent=s.end?fmtCalDisplay(s.end):'End date';
+    endEl.classList.toggle('empty',!s.end);
+  }
+}
+
+// Close calendar only when clicking truly outside the picker wrap
+document.addEventListener('mousedown',e=>{
+  if(calOpenIdx!==null&&!e.target.closest('.range-picker-wrap')){
+    closeAllCals();
+  }
+});
+// Helper so renderSC can call fmtCalDisplay at render time
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').then(r => console.log('SW registered')).catch(e => console.log('SW error', e));
+  });
+}
+
+
+</script>
+</body>
+</html>
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.landing-title{font-family:'Playfair Display',serif;font-size:clamp(2rem,8vw,3rem);font-weight:700;line-height:1.15;margin-bottom:14px;}
+.landing-title em{color:var(--accent);font-style:italic;}
+.landing-sub{font-size:0.98rem;color:var(--text-mid);max-width:340px;margin:0 auto 36px;line-height:1.7;font-weight:300;}
+.features{display:flex;flex-direction:column;gap:10px;max-width:300px;margin:0 auto 44px;text-align:left;}
+.feature{display:flex;align-items:center;gap:12px;font-size:0.85rem;color:var(--text-mid);}
+.feature-icon{width:30px;height:30px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.9rem;flex-shrink:0;}
+.btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:15px 36px;border:none;border-radius:var(--radius-sm);background:var(--accent);color:white;font-family:'Plus Jakarta Sans',sans-serif;font-size:0.95rem;font-weight:700;cursor:pointer;transition:all 0.2s;width:100%;max-width:300px;box-shadow:0 4px 20px rgba(212,133,74,0.35);}
+.btn-primary:hover{background:var(--accent-dark);transform:translateY(-1px);}
+.btn-secondary{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 32px;border:1.5px solid var(--border-light);border-radius:var(--radius-sm);background:none;color:var(--text-mid);font-family:'Plus Jakarta Sans',sans-serif;font-size:0.9rem;font-weight:600;cursor:pointer;transition:all 0.2s;width:100%;max-width:300px;margin-top:10px;}
+.btn-secondary:hover{border-color:var(--accent);color:var(--accent);}
+/* WIZARD */
+#setupScreen{padding:0;}
+.wiz-header{background:var(--surface);border-bottom:1px solid var(--border);padding:calc(var(--safe-top) + 14px) 20px 14px;position:sticky;top:0;z-index:50;}
+.wiz-header-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.wiz-logo{font-family:'Playfair Display',serif;font-size:1.05rem;}
+.wiz-logo em{color:var(--accent);font-style:italic;}
+.wiz-step-txt{font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-dim);}
+.prog-track{height:3px;background:var(--border);border-radius:2px;overflow:hidden;}
+.prog-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--gold));border-radius:2px;transition:width 0.4s ease;}
+.wiz-body{flex:1;overflow-y:auto;padding:24px 20px calc(var(--safe-bottom) + 90px);}
+.wiz-footer{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);padding:14px 20px calc(var(--safe-bottom) + 14px);display:flex;gap:10px;z-index:50;}
+.btn-back-wiz{flex:1;padding:13px;border:1.5px solid var(--border-light);border-radius:var(--radius-xs);background:none;color:var(--text-mid);font-family:'Plus Jakarta Sans',sans-serif;font-size:0.9rem;font-weight:600;cursor:pointer;transition:all 0.2s;}
+.btn-back-wiz:hover{border-color:var(--accent);color:var(--accent);}
+.btn-next-wiz{flex:2;padding:13px;border:none;border-radius:var(--radius-xs);background:var(--accent);color:white;font-family:'Plus Jakarta Sans',sans-serif;font-size:0.9rem;font-weight:700;cursor:pointer;transition:all 0.2s;box-shadow:0 3px 12px rgba(212,133,74,0.3);}
+.btn-next-wiz:hover{background:var(--accent-dark);}
+.btn-next-wiz:disabled{opacity:0.4;cursor:not-allowed;}
+/* Step content */
+.step-title{font-family:'Playfair Display',serif;font-size:1.55rem;font-weight:700;margin-bottom:6px;}
+.step-title em{color:var(--accent);font-style:italic;}
+.step-sub{font-size:0.85rem;color:var(--text-mid);margin-bottom:24px;line-height:1.6;font-weight:300;}
+.info-chip{display:inline-flex;align-items:center;gap:6px;font-size:0.73rem;font-weight:600;color:var(--teal);background:var(--teal-light);padding:5px 12px;border-radius:20px;margin-bottom:18px;}
+/* Slot cards */
+.slot-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:15px 16px;margin-bottom:10px;transition:border-color 0.2s,box-shadow 0.2s;}
+.slot-card:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow);}
+.slot-hdr{display:flex;align-items:center;gap:9px;margin-bottom:12px;}
+.slot-num{width:24px;height:24px;border-radius:50%;background:var(--accent-glow);border:1px solid var(--accent);color:var(--accent);font-size:0.65rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.slot-name-inp{flex:1;background:none;border:none;outline:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:0.92rem;font-weight:600;color:var(--text);}
+.slot-name-inp::placeholder{color:var(--text-dim);}
+.rm-btn{width:26px;height:26px;border-radius:6px;border:1px solid var(--border);background:none;color:var(--text-dim);cursor:pointer;font-size:0.8rem;display:flex;align-items:center;justify-content:center;transition:all 0.15s;flex-shrink:0;}
+.rm-btn:hover{background:var(--danger-light);color:var(--danger);border-color:var(--danger);}
+.date-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:11px;}
+.fld-grp{display:flex;flex-direction:column;gap:4px;}
+.fld-lbl{font-size:0.63rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-dim);}
+input[type="date"],input[type="text"],input[type="email"],input[type="number"]{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-xs);padding:9px 11px;font-family:'Plus Jakarta Sans',sans-serif;font-size:0.86rem;color:var(--text);outline:none;transition:border-color 0.2s;width:100%;-webkit-appearance:none;}
+input:focus{border-color:var(--accent);}
+input::placeholder{color:var(--text-dim);}
+input[type="date"]{color-scheme:dark;cursor:pointer;}
+.max-row{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;background:var(--surface2);border-radius:var(--radius-xs);}
+.max-lbl{font-size:0.8rem;color:var(--text-mid);}
+.stepper{display:flex;align-items:center;gap:11px;}
+.step-btn{width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface3);color:var(--text);font-size:0.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;}
+.step-btn:hover{border-color:var(--accent);color:var(--accent);}
+.max-val{font-size:0.95rem;font-weight:700;color:var(--accent);min-width:22px;text-align:center;}
+.add-btn{display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border:1.5px dashed var(--border-light);border-radius:var(--radius);background:none;color:var(--text-dim);cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;font-size:0.85rem;font-weight:600;transition:all 0.2s;width:100%;margin-top:4px;}
+.add-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-glow);}
+/* Participants */
+.p-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:13px 15px;margin-bottom:9px;display:flex;align-items:center;gap:11px;transition:border-color 0.2s;}
+.p-card:focus-within{border-color:var(--accent);}
+.p-av{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.82rem;font-weight:700;color:white;flex-shrink:0;}
+.p-flds{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0;}
+.p-nm{background:none;border:none;outline:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:0.9rem;font-weight:600;color:var(--text);width:100%;}
+.p-nm::placeholder{color:var(--text-dim);}
+.p-em{background:none;border:none;outline:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:0.76rem;color:var(--text-mid);width:100%;}
+.p-em::placeholder{color:var(--text-dim);}
+.p-div{height:1px;background:var(--border);}
+.p-ord{font-size:0.63rem;font-weight:700;color:var(--text-dim);letter-spacing:0.08em;text-transform:uppercase;flex-shrink:0;min-width:24px;text-align:center;}
+/* Settings */
+.s-grp{margin-bottom:18px;}
+.s-lbl{font-size:0.68rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-dim);margin-bottom:7px;display:block;}
+.s-inp{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 15px;font-family:'Plus Jakarta Sans',sans-serif;font-size:0.9rem;color:var(--text);outline:none;transition:border-color 0.2s,box-shadow 0.2s;width:100%;}
+.s-inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow);}
+.s-inp::placeholder{color:var(--text-dim);}
+.s-hint{font-size:0.73rem;color:var(--text-dim);margin-top:4px;line-height:1.4;}
+/* DRAFT SCREEN */
+#draftScreen{padding:0;}
+.d-hdr{background:var(--surface);border-bottom:1px solid var(--border);padding:calc(var(--safe-top) + 11px) 20px 11px;position:sticky;top:0;z-index:50;}
+.d-hdr-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;}
+.d-title{font-family:'Playfair Display',serif;font-size:1.1rem;}
+.d-title em{color:var(--accent);font-style:italic;}
+.d-badge{font-size:0.65rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-dim);background:var(--surface2);padding:3px 9px;border-radius:20px;}
+.d-prog-row{display:flex;gap:6px;align-items:center;}
+.d-prog-track{flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden;}
+.d-prog-fill{height:100%;background:linear-gradient(90deg,var(--teal),var(--accent));border-radius:2px;transition:width 0.5s ease;}
+.d-prog-txt{font-size:0.7rem;color:var(--text-dim);flex-shrink:0;}
+/* Turn banner */
+.turn-banner{margin:18px 18px 0;background:linear-gradient(135deg,var(--surface2),var(--surface3));border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;position:relative;overflow:hidden;}
+.turn-banner::before{content:'';position:absolute;top:-20px;right:-20px;width:80px;height:80px;background:radial-gradient(circle,var(--accent-glow) 0%,transparent 70%);}
+.t-lbl{font-size:0.63rem;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-dim);margin-bottom:7px;}
+.t-person{display:flex;align-items:center;gap:11px;margin-bottom:11px;}
+.t-av{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.95rem;font-weight:700;color:white;flex-shrink:0;border:2px solid rgba(255,255,255,0.12);}
+.t-name{font-family:'Playfair Display',serif;font-size:1.15rem;}
+.t-sub{font-size:0.76rem;color:var(--text-mid);margin-top:1px;}
+.t-actions{display:flex;gap:8px;}
+.btn-skip{flex:1;padding:9px;border:1px solid var(--border-light);border-radius:var(--radius-xs);background:none;color:var(--text-mid);font-family:'Plus Jakarta Sans',sans-serif;font-size:0.8rem;font-weight:600;cursor:pointer;transition:all 0.2s;}
+.btn-skip:hover{border-color:var(--accent);color:var(--accent);}
+.ro-banner{margin:18px 18px 0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:13px 16px;display:flex;align-items:center;gap:9px;font-size:0.82rem;color:var(--text-mid);}
+.complete-banner{margin:18px 18px 0;background:linear-gradient(135deg,#2a6a5a,#1a4a3a);border-radius:var(--radius);padding:22px 18px;text-align:center;}
+.complete-banner h2{font-family:'Playfair Display',serif;font-size:1.3rem;margin-bottom:5px;}
+.complete-banner p{font-size:0.82rem;opacity:0.8;line-height:1.5;}
+/* Slots */
+.slots-sec{padding:18px;}
+.sec-title{font-size:0.68rem;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-dim);margin-bottom:13px;display:flex;align-items:center;gap:8px;}
+.sec-title::after{content:'';flex:1;height:1px;background:var(--border);}
+.slots-grid{display:flex;flex-direction:column;gap:9px;}
+.d-slot{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px 16px;cursor:pointer;transition:all 0.2s;position:relative;overflow:hidden;}
+.d-slot:active{transform:scale(0.98);}
+.d-slot.avail{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow);}
+.d-slot.avail::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--accent-glow) 0%,transparent 60%);pointer-events:none;}
+.d-slot.claimed{border-color:var(--teal);background:var(--teal-light);}
+.d-slot.full{opacity:0.45;cursor:not-allowed;}
+.d-slot.blocked{opacity:0.35;cursor:not-allowed;}
+.d-slot-lbl{font-weight:700;font-size:0.92rem;margin-bottom:2px;}
+.d-slot-dates{font-size:0.75rem;color:var(--text-mid);margin-bottom:11px;}
+.spots-row{display:flex;gap:4px;margin-bottom:7px;flex-wrap:wrap;}
+.spot{width:21px;height:21px;border-radius:50%;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.58rem;font-weight:700;}
+.spot.filled{border-color:transparent;}
+.spot.empty{background:var(--surface2);color:var(--text-dim);}
+.slot-stat{font-size:0.7rem;font-weight:600;display:flex;align-items:center;gap:4px;}
+.stat-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+.max-badge{position:absolute;top:11px;right:11px;background:var(--gold);color:#1a1612;font-size:0.58rem;font-weight:700;padding:2px 7px;border-radius:20px;}
+/* History */
+.hist-sec{padding:0 18px 18px;}
+.hist-list{display:flex;flex-direction:column;gap:7px;}
+.hist-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px 13px;display:flex;align-items:center;gap:9px;}
+.hist-av{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.67rem;font-weight:700;color:white;flex-shrink:0;}
+.hist-info{flex:1;min-width:0;}
+.hist-name{font-size:0.82rem;font-weight:600;}
+.hist-slot{font-size:0.73rem;color:var(--text-mid);margin-top:1px;}
+.hist-pick{font-size:0.65rem;font-weight:700;color:var(--accent);background:var(--accent-glow);padding:2px 7px;border-radius:20px;flex-shrink:0;}
+/* Modal */
+.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);z-index:100;display:flex;align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;transition:opacity 0.25s;}
+.modal-ov.active{opacity:1;pointer-events:all;}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;padding:24px 20px calc(var(--safe-bottom) + 24px);width:100%;max-width:480px;transform:translateY(100%);transition:transform 0.3s ease;}
+.modal-ov.active .modal{transform:translateY(0);}
+.modal-handle{width:38px;height:4px;border-radius:2px;background:var(--border-light);margin:0 auto 20px;}
+.modal-title{font-family:'Playfair Display',serif;font-size:1.25rem;margin-bottom:5px;}
+.modal-sub{font-size:0.82rem;color:var(--text-mid);margin-bottom:18px;line-height:1.5;}
+.modal-slot-info{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:13px 15px;margin-bottom:18px;}
+.modal-slot-nm{font-weight:700;font-size:0.95rem;margin-bottom:2px;}
+.modal-slot-dt{font-size:0.77rem;color:var(--text-mid);}
+.modal-spots{display:flex;gap:5px;margin-top:9px;flex-wrap:wrap;}
+.m-fld{margin-bottom:13px;}
+.m-fld label{display:block;font-size:0.65rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:5px;}
+.m-inp{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-xs);padding:10px 13px;font-family:'Plus Jakarta Sans',sans-serif;font-size:0.88rem;color:var(--text);outline:none;}
+.m-inp:focus{border-color:var(--accent);}
+.m-inp[readonly]{opacity:0.5;cursor:default;}
+.modal-acts{display:flex;gap:9px;margin-top:18px;}
+.btn-m-cancel{flex:1;padding:12px;border:1px solid var(--border-light);border-radius:var(--radius-xs);background:none;color:var(--text-mid);font-family:'Plus Jakarta Sans',sans-serif;font-size:0.88rem;font-weight:600;cursor:pointer;transition:all 0.2s;}
+.btn-m-cancel:hover{border-color:var(--accent);color:var(--accent);}
+.btn-m-confirm{flex:2;padding:12px;border:none;border-radius:var(--radius-xs);background:var(--accent);color:white;font-family:'Plus Jakarta Sans',sans-serif;font-size:0.88rem;font-weight:700;cursor:pointer;transition:all 0.2s;}
+.btn-m-confirm:hover{background:var(--accent-dark);}
+/* JOIN */
+#joinScreen{align-items:center;justify-content:center;padding:calc(var(--safe-top)+40px) 24px calc(var(--safe-bottom)+40px);text-align:center;}
+.join-logo{font-size:2.5rem;margin-bottom:22px;}
+.join-title{font-family:'Playfair Display',serif;font-size:1.75rem;margin-bottom:7px;}
+.join-title em{color:var(--accent);font-style:italic;}
+.join-sub{font-size:0.88rem;color:var(--text-mid);margin-bottom:28px;line-height:1.6;font-weight:300;}
+.join-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:22px;width:100%;max-width:360px;text-align:left;}
+/* Toast */
+.toast{position:fixed;bottom:calc(var(--safe-bottom) + 20px);left:50%;transform:translateX(-50%) translateY(80px);background:var(--surface);border:1px solid var(--border-light);color:var(--text);padding:11px 18px;border-radius:100px;font-size:0.82rem;font-weight:500;white-space:nowrap;box-shadow:var(--shadow-lg);z-index:200;transition:transform 0.3s ease,opacity 0.3s ease;opacity:0;}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
+.toast.success{border-color:var(--teal);}
+.toast.error{border-color:var(--danger);}
+/* Loading */
+.loading{display:flex;align-items:center;justify-content:center;min-height:100dvh;flex-direction:column;gap:14px;color:var(--text-mid);font-size:0.88rem;}
+.spinner{width:34px;height:34px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--accent);animation:spin 0.8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* PWA install */
+.install-banner{position:fixed;bottom:calc(var(--safe-bottom)+14px);left:14px;right:14px;background:var(--surface);border:1px solid var(--accent);border-radius:var(--radius);padding:14px 16px;display:flex;align-items:center;gap:12px;box-shadow:var(--shadow-lg);z-index:150;animation:slideUp 0.4s ease;}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+.install-txt{flex:1;font-size:0.82rem;color:var(--text);line-height:1.4;}
+.install-txt strong{color:var(--accent);}
+.btn-install{padding:7px 14px;border:none;border-radius:var(--radius-xs);background:var(--accent);color:white;font-family:'Plus Jakarta Sans',sans-serif;font-size:0.8rem;font-weight:700;cursor:pointer;flex-shrink:0;}
+.btn-inst-dismiss{width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:none;color:var(--text-dim);cursor:pointer;font-size:0.85rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+@media(min-width:480px){.slots-grid{display:grid;grid-template-columns:1fr 1fr;}}
+@media(min-width:768px){.slots-grid{grid-template-columns:repeat(3,1fr);}}
+
+/* ── RANGE CALENDAR PICKER ── */
+.range-picker-wrap{position:relative;margin-bottom:11px;}
+.range-display{
+  display:flex;align-items:center;gap:8px;
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius-xs);padding:9px 12px;cursor:pointer;
+  transition:border-color 0.2s;user-select:none;
+}
+.range-display:hover,.range-display.open{border-color:var(--accent);}
+.range-display-start,.range-display-end{
+  flex:1;font-size:0.84rem;font-weight:600;color:var(--text);text-align:center;
+}
+.range-display-start.empty,.range-display-end.empty{color:var(--text-dim);font-weight:400;}
+.range-arrow{color:var(--text-dim);font-size:0.8rem;flex-shrink:0;}
+.range-cal{
+  position:absolute;top:calc(100% + 6px);left:0;right:0;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:14px;
+  box-shadow:var(--shadow-lg);z-index:200;
+  display:none;
+}
+.range-cal.open{display:block;animation:fadeSlideD 0.18s ease;}
+@keyframes fadeSlideD{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.cal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.cal-nav{width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:none;
+  color:var(--text-mid);cursor:pointer;font-size:0.9rem;display:flex;align-items:center;justify-content:center;transition:all 0.15s;}
+.cal-nav:hover{border-color:var(--accent);color:var(--accent);}
+.cal-month{font-family:'Playfair Display',serif;font-size:0.95rem;font-weight:500;color:var(--text);}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}
+.cal-dow{text-align:center;font-size:0.62rem;font-weight:700;letter-spacing:0.06em;
+  text-transform:uppercase;color:var(--text-dim);padding:4px 0;}
+.cal-day{
+  text-align:center;padding:6px 2px;font-size:0.82rem;border-radius:6px;
+  cursor:pointer;transition:all 0.15s;color:var(--text-mid);position:relative;
+}
+.cal-day:hover:not(.cal-empty):not(.cal-past){background:var(--surface3);color:var(--text);}
+.cal-day.cal-empty{cursor:default;}
+.cal-day.cal-past{opacity:0.25;cursor:not-allowed;}
+.cal-day.cal-start{background:var(--accent)!important;color:white!important;border-radius:6px 0 0 6px;}
+.cal-day.cal-end{background:var(--accent)!important;color:white!important;border-radius:0 6px 6px 0;}
+.cal-day.cal-start.cal-end{border-radius:6px!important;}
+.cal-day.cal-in-range{background:var(--accent-glow);color:var(--text);border-radius:0;}
+.cal-day.cal-today{font-weight:700;color:var(--accent);}
+.cal-hint{font-size:0.72rem;color:var(--text-dim);text-align:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
+
+/* On deck banner */
+.on-deck-strip{
+  margin:8px 18px 0;
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:10px 14px;
+  display:flex;align-items:center;gap:10px;
+}
+.on-deck-lbl{font-size:0.63rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-dim);flex-shrink:0;}
+.on-deck-person{display:flex;align-items:center;gap:8px;flex:1;}
+.on-deck-av{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.65rem;font-weight:700;color:white;flex-shrink:0;}
+.on-deck-name{font-size:0.82rem;font-weight:600;color:var(--text-mid);}
+</style>
+</head>
+<body>
+
+<div id="loadingScreen" class="loading"><div class="spinner"></div><span>Loading…</span></div>
+
+<!-- LANDING -->
+<div class="screen" id="landingScreen">
+  <div class="landing-logo">🏝</div>
+  <h1 class="landing-title">Vacation<br><em>Schedule Draft</em></h1>
+  <p class="landing-sub">The fairest way to schedule team vacations — a snake-order draft where everyone gets a turn.</p>
+  <div class="features">
+    <div class="feature"><div class="feature-icon">🐍</div>Snake-order draft — fair every round</div>
+    <div class="feature"><div class="feature-icon">📧</div>Auto email notifications each turn</div>
+    <div class="feature"><div class="feature-icon">⚡</div>Real-time — picks appear instantly</div>
+    <div class="feature"><div class="feature-icon">📱</div>Works on any phone or computer</div>
+  </div>
+  <button class="btn-primary" onclick="showSetup()">✦ Create a New Draft</button>
+  <button class="btn-secondary" onclick="showJoin()">I have a draft code →</button>
+</div>
+
+<!-- SETUP -->
+<div class="screen" id="setupScreen">
+  <div class="wiz-header">
+    <div class="wiz-header-row">
+      <div class="wiz-logo">Vacation <em>Draft</em></div>
+      <div class="wiz-step-txt" id="stepTxt">Step 1 of 4</div>
+    </div>
+    <div class="prog-track"><div class="prog-fill" id="progFill" style="width:33%"></div></div>
+  </div>
+  <div class="wiz-body" id="wizBody"></div>
+  <div class="wiz-footer">
+    <button class="btn-back-wiz" id="btnBack" onclick="wizBack()">← Back</button>
+    <button class="btn-next-wiz" id="btnNext" onclick="wizNext()">Next →</button>
+  </div>
+</div>
+
+<!-- DRAFT BOARD -->
+<div class="screen" id="draftScreen">
+  <div class="d-hdr">
+    <div class="d-hdr-row">
+      <div class="d-title" id="dTitleEl">Vacation <em>Draft</em></div>
+      <div class="d-badge" id="dBadge">Round 1</div>
+    </div>
+    <div class="d-prog-row">
+      <div class="d-prog-track"><div class="d-prog-fill" id="dProgFill" style="width:0%"></div></div>
+      <div class="d-prog-txt" id="dProgTxt">0 / 0 filled</div>
+    </div>
+  </div>
+  <div id="bannerArea"></div>
+  <div class="slots-sec">
+    <div class="sec-title">Available Dates</div>
+    <div class="slots-grid" id="slotsGrid"></div>
+  </div>
+  <div class="hist-sec">
+    <div class="sec-title">Pick History</div>
+    <div class="hist-list" id="histList"><div style="color:var(--text-dim);font-size:0.82rem;padding:6px 0">No picks yet</div></div>
+  </div>
+</div>
+
+<!-- JOIN -->
+<div class="screen" id="joinScreen">
+  <div class="join-logo">🏝</div>
+  <h1 class="join-title">Join a <em>Draft</em></h1>
+  <p class="join-sub">Enter the 6-character code from your email.</p>
+  <div class="join-card">
+    <label class="s-lbl">Draft Code</label>
+    <input type="text" class="s-inp" id="joinCode" placeholder="ABC123" maxlength="6" style="margin-bottom:14px;text-transform:uppercase;letter-spacing:0.15em;font-size:1.1rem;font-weight:700;text-align:center;">
+    <button class="btn-primary" onclick="joinDraft()" style="max-width:none;">Join Draft →</button>
+  </div>
+  <button class="btn-secondary" onclick="showScreen('landingScreen')" style="margin-top:14px;max-width:300px;">← Back</button>
+</div>
+
+<!-- PICK MODAL -->
+<div class="modal-ov" id="pickModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Claim this date</div>
+    <div class="modal-sub" id="mSub">Confirm your pick</div>
+    <div class="modal-slot-info">
+      <div class="modal-slot-nm" id="mSlotNm">—</div>
+      <div class="modal-slot-dt" id="mSlotDt">—</div>
+      <div class="modal-spots" id="mSpots"></div>
+    </div>
+    <div class="m-fld"><label>Your email</label><input type="email" class="m-inp" id="mPickerEmail" placeholder="your@email.com"></div>
+    <div class="m-fld"><label>Next person notified</label><input type="email" class="m-inp" id="mNextEmail" readonly></div>
+    <div class="modal-acts">
+      <button class="btn-m-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-m-confirm" onclick="confirmPick()">Confirm Pick ✓</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span id="toastMsg">—</span></div>
+<div id="installBanner" style="display:none" class="install-banner">
+  <div class="install-txt"><strong>Add to Home Screen</strong><br>Install for the best experience</div>
+  <button class="btn-install" onclick="installPWA()">Install</button>
+  <button class="btn-inst-dismiss" onclick="dismissInstall()">✕</button>
+</div>
+
+<script>
+// ── CONFIG ──
+const CFG={
+  supabaseUrl:'https://fibzznhqgojdoapdnfwp.supabase.co',
+  supabaseKey:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpYnp6bmhxZ29qZG9hcGRuZndwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MjM5MjMsImV4cCI6MjA5MjA5OTkyM30.waPgUU1JIKVG613yGOk1dY_AThpm2IHaJZSVmJtfTZ4',
+  resendKey:'re_XJa9T9MB_2RpWu7xEvGx3v3sunmQEQHvd',
+  appUrl:'https://vacationscheduledraft.com',
+  fromEmail:'draft@vacationscheduledraft.com',
+  fromName:'Vacation Schedule Draft',
+};
+
+// ── SUPABASE ──
+const sb={
+  h:{
+    'apikey':CFG.supabaseKey,
+    'Authorization':'Bearer '+CFG.supabaseKey,
+    'Content-Type':'application/json',
+    'Prefer':'return=representation',
+  },
+  async get(t,q=''){const r=await fetch(`${CFG.supabaseUrl}/rest/v1/${t}${q}`,{headers:this.h});return r.json();},
+  async post(t,b){const r=await fetch(`${CFG.supabaseUrl}/rest/v1/${t}`,{method:'POST',headers:this.h,body:JSON.stringify(b)});return r.json();},
+  async patch(t,q,b){const r=await fetch(`${CFG.supabaseUrl}/rest/v1/${t}${q}`,{method:'PATCH',headers:this.h,body:JSON.stringify(b)});return r.json();},
+};
+
+// ── COLORS ──
+const COLORS=['#d4854a','#4a9e8a','#c9a84c','#7a5ca5','#4a7ab5','#9a5a7a','#4a8a6a','#9a7a4a','#4a7a9a','#9a4a4a','#5a7a4a','#7a4a9a','#4a5a9a','#8a6a4a','#4a9a7a'];
+
+// ── APP STATE ──
+let S={draft:null,slots:[],participants:[],claims:[],pollInterval:null,pendingSlotId:null};
+
+// ── WIZARD STATE ──
+let W={
+  step:1,
+  slots:[{label:'',start:'',end:'',max:4},{label:'',start:'',end:'',max:4},{label:'',start:'',end:'',max:4},{label:'',start:'',end:'',max:4},{label:'',start:'',end:'',max:4}],
+  participants:[{name:'',email:''},{name:'',email:''},{name:'',email:''}],
+  adminEmail:'',draftName:'',
+  exclusionGroups:[], // [{name:'', maxPicks:1, slotIndices:[]}]
+  randomizeOrder:false,
+};
+
+// ── SCREENS ──
+function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
+function showSetup(){showScreen('setupScreen');renderStep();}
+function showJoin(){showScreen('joinScreen');}
+
+// ── WIZARD ──
+function renderStep(){
+  const pct=(W.step/4)*100;
+  document.getElementById('progFill').style.width=pct+'%';
+  document.getElementById('stepTxt').textContent=`Step ${W.step} of 4`;
+  document.getElementById('btnBack').style.display=W.step===1?'none':'';
+  document.getElementById('btnNext').textContent=W.step===4?'🏝 Launch Draft':'Next →';
+  const body=document.getElementById('wizBody');
+  if(W.step===1)body.innerHTML=renderS1();
+  if(W.step===2)body.innerHTML=renderS2();
+  if(W.step===4)body.innerHTML=renderS4();
+  if(W.step===4)body.innerHTML=renderS4();
+}
+
+function wizBack(){if(W.step>1){W.step--;renderStep();}else showScreen('landingScreen');}
+function wizNext(){if(!validate())return;if(W.step<4){W.step++;renderStep();}else launchDraft();}
+
+function validate(){
+  if(W.step===1){
+    const filled=W.slots.filter(s=>s.label.trim()&&s.start&&s.end);
+    if(!filled.length){showToast('Add at least one date period','error');return false;}
+    const bad=filled.find(s=>new Date(s.end)<new Date(s.start));
+    if(bad){showToast(`"${bad.label}": end must be after start`,'error');return false;}
+    return true;
+  }
+  if(W.step===2){return true;} // exclusions step — always optional
+  if(W.step===3){
+    // participants step — same as old step 2
+    const named=W.participants.filter(p=>p.name.trim());
+    if(named.length<2){showToast('Add at least 2 participants','error');return false;}
+    return true;
+  }
+  if(W.step===4){
+    if(!W.draftName.trim()){showToast('Enter a draft name','error');return false;}
+    if(!W.adminEmail.includes('@')){showToast('Enter a valid admin email','error');return false;}
+    return true;
+  }
+  return true;
+}
+
+// S1: DATE SLOTS
+function renderS1(){
+  return `<div class="step-title">What dates are <em>available?</em></div>
+<p class="step-sub">Add vacation periods your team can select. Give each a name, date range, and max people.</p>
+<div class="info-chip">✦ Start with 5 — add or remove as needed</div>
+<div id="wizSlots">${W.slots.map((s,i)=>renderSC(s,i)).join('')}</div>
+<button class="add-btn" onclick="addSlot()">＋ Add another period</button>`;
+}
+
+function renderSC(s,i){
+  return `<div class="slot-card">
+    <div class="slot-hdr">
+      <div class="slot-num">${i+1}</div>
+      <input class="slot-name-inp" placeholder="e.g. Summer Week 1" value="${s.label}" oninput="W.slots[${i}].label=this.value">
+      <button class="rm-btn" onclick="rmSlot(${i})">✕</button>
+    </div>
+    <div class="fld-lbl" style="margin-bottom:6px;">Date Range</div>
+    <div class="range-picker-wrap" id="rpWrap${i}">
+      <div class="range-display" id="rpDisplay${i}" onclick="toggleCal(${i})">
+        <div class="range-display-start ${s.start ? '' : 'empty'}" id="rpStart${i}">${s.start ? fmtCalDisplay(s.start) : 'Start date'}</div>
+        <div class="range-arrow">→</div>
+        <div class="range-display-end ${s.end ? '' : 'empty'}" id="rpEnd${i}">${s.end ? fmtCalDisplay(s.end) : 'End date'}</div>
+      </div>
+      <div class="range-cal" id="rpCal${i}"></div>
+    </div>
+    <div class="max-row">
+      <div class="max-lbl">Max people</div>
+      <div class="stepper">
+        <button class="step-btn" onclick="chMax(${i},-1)">−</button>
+        <div class="max-val" id="mv${i}">${s.max}</div>
+        <button class="step-btn" onclick="chMax(${i},1)">+</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function addSlot(){W.slots.push({label:'',start:'',end:'',max:4});document.getElementById('wizSlots').innerHTML=W.slots.map((s,i)=>renderSC(s,i)).join('');}
+function rmSlot(i){if(W.slots.length<=1){showToast('Need at least one slot','error');return;}W.slots.splice(i,1);document.getElementById('wizSlots').innerHTML=W.slots.map((s,i)=>renderSC(s,i)).join('');}
+function chMax(i,d){W.slots[i].max=Math.max(1,Math.min(50,(W.slots[i].max||4)+d));const el=document.getElementById('mv'+i);if(el)el.textContent=W.slots[i].max;}
+
+
+// S2: EXCLUSION GROUPS
+function renderS2(){
+  const hasSlots = W.slots.filter(s=>s.label.trim()).length > 1;
+  if(!hasSlots) return `<div class="step-title">Mutual <em>Exclusions</em></div><p class="step-sub">Add at least 2 date periods in Step 1 to set up exclusion rules.</p>`;
+
+  const validSlots = W.slots.filter(s=>s.label.trim());
+
+  return `<div class="step-title">Mutual <em>Exclusions</em></div>
+<p class="step-sub">Optional — if selecting one period should prevent someone from also selecting another, group them here. For example, Christmas Week and New Year's Week might be mutually exclusive.</p>
+<div class="info-chip">✦ Skip this step if all periods are independent</div>
+<div id="exclGroups">${W.exclusionGroups.map((g,i)=>renderEG(g,i,validSlots)).join('')}</div>
+<button class="add-btn" onclick="addEG()">＋ Add exclusion group</button>
+<div style="margin-top:20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;">
+  <div style="font-size:0.78rem;color:var(--text-mid);line-height:1.6;">
+    <strong style="color:var(--accent)">Example</strong><br><br>
+    Group: "Holiday Weeks"<br>
+    Includes: Christmas Week + New Year's Week<br>
+    Max picks: 1<br><br>
+    → Each person can only select <em>one</em> of those two weeks.
+  </div>
+</div>`;
+}
+
+function renderEG(g, i, validSlots){
+  const slotOptions = validSlots.map((s,si)=>{
+    const realIdx = W.slots.indexOf(s);
+    const checked = g.slotIndices.includes(realIdx) ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:0.85rem;color:var(--text-mid);transition:background 0.15s;" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='none'">
+      <input type="checkbox" ${checked} onchange="toggleSlot(${i},${realIdx},this.checked)" style="accent-color:var(--accent);width:16px;height:16px;cursor:pointer;">
+      ${s.label}
+    </label>`;
+  }).join('');
+
+  return `<div class="slot-card" style="margin-bottom:12px;">
+    <div class="slot-hdr">
+      <div class="slot-num">${i+1}</div>
+      <input class="slot-name-inp" placeholder="Group name (e.g. Holiday Weeks)" value="${g.name}" oninput="W.exclusionGroups[${i}].name=this.value">
+      <button class="rm-btn" onclick="rmEG(${i})">✕</button>
+    </div>
+    <div style="margin-bottom:12px;">
+      <div class="fld-lbl" style="margin-bottom:8px;">Select which periods are mutually exclusive:</div>
+      <div style="display:flex;flex-direction:column;gap:2px;background:var(--surface2);border-radius:8px;padding:4px;">${slotOptions}</div>
+    </div>
+    <div class="max-row">
+      <div class="max-lbl">Max picks allowed per person from this group</div>
+      <div class="stepper">
+        <button class="step-btn" onclick="chEGMax(${i},-1)">−</button>
+        <div class="max-val" id="egmv${i}">${g.maxPicks}</div>
+        <button class="step-btn" onclick="chEGMax(${i},1)">+</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function addEG(){
+  W.exclusionGroups.push({name:'',maxPicks:1,slotIndices:[]});
+  const validSlots=W.slots.filter(s=>s.label.trim());
+  document.getElementById('exclGroups').innerHTML=W.exclusionGroups.map((g,i)=>renderEG(g,i,validSlots)).join('');
+}
+
+function rmEG(i){
+  W.exclusionGroups.splice(i,1);
+  const validSlots=W.slots.filter(s=>s.label.trim());
+  document.getElementById('exclGroups').innerHTML=W.exclusionGroups.map((g,i)=>renderEG(g,i,validSlots)).join('');
+}
+
+function toggleSlot(groupIdx, slotIdx, checked){
+  const g=W.exclusionGroups[groupIdx];
+  if(checked){if(!g.slotIndices.includes(slotIdx))g.slotIndices.push(slotIdx);}
+  else{g.slotIndices=g.slotIndices.filter(i=>i!==slotIdx);}
+}
+
+function chEGMax(i,d){
+  W.exclusionGroups[i].maxPicks=Math.max(1,Math.min(10,(W.exclusionGroups[i].maxPicks||1)+d));
+  const el=document.getElementById('egmv'+i);if(el)el.textContent=W.exclusionGroups[i].maxPicks;
+}
+
+// S3: PARTICIPANTS
+function renderS3(){
+  const chipText = W.randomizeOrder ? '✦ Order will be randomized at launch' : '✦ Order here = Round 1 draft order';
+  return `<div class="step-title">Who's <em>participating?</em></div>
+<p class="step-sub">Add everyone joining. The draft will follow the exact order names are entered here — person #1 picks first in Round 1, person #2 picks second, and so on. If you'd prefer a random order, use the <strong style="color:var(--accent)">Randomize order</strong> toggle below.</p>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:12px;">
+  <div class="info-chip" id="orderChip" style="margin-bottom:0">${chipText}</div>
+  <button onclick="toggleRandomize()" id="randBtn" style="
+    display:flex;align-items:center;gap:8px;padding:7px 14px;
+    border:1.5px solid ${W.randomizeOrder ? 'var(--accent)' : 'var(--border-light)'};
+    border-radius:20px;background:${W.randomizeOrder ? 'var(--accent-glow)' : 'none'};
+    color:${W.randomizeOrder ? 'var(--accent)' : 'var(--text-dim)'};
+    font-family:'Plus Jakarta Sans',sans-serif;font-size:0.78rem;font-weight:700;
+    cursor:pointer;transition:all 0.2s;flex-shrink:0;
+  ">
+    <span style="font-size:1rem">${W.randomizeOrder ? '🎲' : '🔢'}</span>
+    ${W.randomizeOrder ? 'Randomized' : 'Randomize order'}
+  </button>
+</div>
+<div id="wizPeople">${W.participants.map((p,i)=>renderPC(p,i)).join('')}</div>
+<button class="add-btn" onclick="addP()">＋ Add participant</button>`;
+}
+
+function toggleRandomize(){
+  W.randomizeOrder = !W.randomizeOrder;
+  // Re-render just the toggle button and chip without full step re-render
+  document.getElementById('wizBody').innerHTML = renderS3();
+}
+
+function renderPC(p,i){
+  const c=COLORS[i%COLORS.length];
+  const init=p.name.trim()?p.name.trim()[0].toUpperCase():(i+1);
+  return `<div class="p-card">
+    <div class="p-ord">${i+1}</div>
+    <div class="p-av" id="pav${i}" style="background:${c}">${init}</div>
+    <div class="p-flds">
+      <input class="p-nm" placeholder="Full name" value="${p.name}" oninput="W.participants[${i}].name=this.value;upAv(${i})">
+      <div class="p-div"></div>
+      <input class="p-em" type="email" placeholder="email@company.com" value="${p.email}" oninput="W.participants[${i}].email=this.value">
+    </div>
+    <button class="rm-btn" onclick="rmP(${i})">✕</button>
+  </div>`;
+}
+
+function upAv(i){const el=document.getElementById('pav'+i);if(el)el.textContent=W.participants[i].name.trim()?W.participants[i].name.trim()[0].toUpperCase():(i+1);}
+function addP(){W.participants.push({name:'',email:''});document.getElementById('wizPeople').innerHTML=W.participants.map((p,i)=>renderPC(p,i)).join('');}
+function rmP(i){if(W.participants.length<=2){showToast('Need at least 2','error');return;}W.participants.splice(i,1);document.getElementById('wizPeople').innerHTML=W.participants.map((p,i)=>renderPC(p,i)).join('');}
+
+// S4: SETTINGS
+function renderS4(){
+  return `<div class="step-title">Almost <em>ready!</em></div>
+<p class="step-sub">Two quick details and your draft is live.</p>
+<div class="s-grp"><label class="s-lbl">Draft Name</label><input type="text" class="s-inp" placeholder="e.g. Team Vacation Draft 2027" value="${W.draftName}" oninput="W.draftName=this.value"></div>
+<div class="s-grp"><label class="s-lbl">Your Email (Admin)</label><input type="email" class="s-inp" placeholder="you@company.com" value="${W.adminEmail}" oninput="W.adminEmail=this.value"><div class="s-hint">You'll get pick notifications and the final summary.</div></div>
+<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;margin-top:6px;">
+<div style="font-size:0.78rem;color:var(--text-mid);line-height:1.65;">
+<strong style="color:var(--accent)">🐍 Snake draft</strong><br><br>
+Round 1: picks 1 → N<br>Round 2: reverses N → 1<br>Round 3: forward 1 → N<br>…until all slots are filled.<br><br>
+Everyone gets a magic link by email on their turn.
+</div></div>`;
+}
+
+// ── LAUNCH ──
+async function launchDraft(){
+  document.getElementById('btnNext').disabled=true;
+  document.getElementById('btnNext').textContent='⏳ Creating…';
+  try{
+    const code=genCode();
+    const validSlots=W.slots.filter(s=>s.label.trim()&&s.start&&s.end);
+    const validPeople=W.participants.filter(p=>p.name.trim());
+    const n=validPeople.length;
+    const baseOrder = W.randomizeOrder ? shuffle([...Array(n).keys()]) : [...Array(n).keys()];
+    console.log('Draft order:', W.randomizeOrder ? 'randomized' : 'as entered', baseOrder);
+
+    const validExclGroups=W.exclusionGroups.filter(g=>g.slotIndices.length>=2);
+    const [draft]=await sb.post('drafts',{
+      code,name:W.draftName.trim(),admin_email:W.adminEmail.trim(),
+      base_order:JSON.stringify(baseOrder),
+      current_pick_index:0,total_picks:0,launched:true,completion_sent:false,
+      current_token:genToken(0),turn_started_at:new Date().toISOString(),
+      exclusion_groups:JSON.stringify(validExclGroups),
+    });
+
+    for(let i=0;i<validSlots.length;i++){
+      const s=validSlots[i];
+      await sb.post('slots',{draft_id:draft.id,label:s.label,start_date:s.start,end_date:s.end,max_people:s.max,sort_order:i});
+    }
+    for(let i=0;i<validPeople.length;i++){
+      const p=validPeople[i];
+      await sb.post('participants',{draft_id:draft.id,name:p.name.trim(),email:p.email.trim(),sort_order:i,color:COLORS[i%COLORS.length]});
+    }
+
+    await loadState(draft.id);
+
+    // Send opening email to first drafter
+    const firstPIdx=baseOrder[0];
+    const firstP=S.participants[firstPIdx];
+    if(firstP?.email){
+      await sendEmail({
+        to:firstP.email,toName:firstP.name,
+        subject:`🏝 ${draft.name} — The draft has started! You pick first.`,
+        body:buildTurnBody(firstP,null,null,draft,'launch',buildLink(draft)),
+      });
+    }
+
+    showToast('Draft launched! Email sent to first picker 📧','success');
+    showScreen('draftScreen');
+    startPoll(draft.id);
+    renderBoard();
+  }catch(err){
+    console.error(err);
+    showToast('Error — check connection','error');
+    document.getElementById('btnNext').disabled=false;
+    document.getElementById('btnNext').textContent='🏝 Launch Draft';
+  }
+}
+
+// ── STATE LOADING ──
+async function loadState(draftId){
+  const [drafts,slots,people,claims]=await Promise.all([
+    sb.get('drafts',`?id=eq.${draftId}`),
+    sb.get('slots',`?draft_id=eq.${draftId}&order=sort_order`),
+    sb.get('participants',`?draft_id=eq.${draftId}&order=sort_order`),
+    sb.get('claims',`?draft_id=eq.${draftId}&order=pick_number`),
+  ]);
+  S.draft=drafts[0];S.slots=slots;S.participants=people;S.claims=claims;
+}
+
+function startPoll(draftId){
+  if(S.pollInterval)clearInterval(S.pollInterval);
+  S.pollInterval=setInterval(async()=>{await loadState(draftId);renderBoard();},4000);
+}
+
+// ── JOIN ──
+async function joinDraft(){
+  const code=document.getElementById('joinCode').value.trim().toUpperCase();
+  if(!code){showToast('Enter a draft code','error');return;}
+  const drafts=await sb.get('drafts',`?code=eq.${code}`);
+  if(!drafts.length){showToast('Draft not found','error');return;}
+  await loadState(drafts[0].id);
+  showScreen('draftScreen');startPoll(drafts[0].id);renderBoard();
+}
+
+// ── SNAKE ──
+function pAtIdx(idx){
+  if(!S.draft)return 0;
+  const base=JSON.parse(S.draft.base_order||'[]');
+  const n=base.length;if(!n)return 0;
+  const round=Math.floor(idx/n);const pos=idx%n;
+  return round%2===0?base[pos]:base[n-1-pos];
+}
+function roundNum(idx){const n=S.participants.length||1;return Math.floor(idx/n)+1;}
+function isDone(){
+  if(!S.slots.length)return false;
+  if(S.slots.every(sl=>{const f=S.claims.filter(c=>c.slot_id===sl.id).length;return f>=sl.max_people;}))return true;
+  return!S.participants.some((_,pi)=>canP(pi));
+}
+function canP(pi){
+  return S.slots.some(sl=>{
+    const cnt=S.claims.filter(c=>c.slot_id===sl.id).length;
+    const mine=S.claims.some(c=>c.slot_id===sl.id&&c.participant_index===pi);
+    const blocked=isExcBlocked(sl,pi);
+    return cnt<sl.max_people&&!mine&&!blocked;
+  });
+}
+
+function isExcBlocked(slot,pi){
+  if(!S.draft?.exclusion_groups)return false;
+  let groups=[];
+  try{groups=JSON.parse(S.draft.exclusion_groups||'[]');}catch(e){return false;}
+  // Find slot index in S.slots
+  const slotIdx=S.slots.findIndex(s=>s.id===slot.id);
+  for(const g of groups){
+    if(!g.slotIndices.includes(slotIdx))continue;
+    // Count how many of this group's slots the person has already claimed
+    const pickedInGroup=g.slotIndices.filter(si=>{
+      const sl2=S.slots[si];
+      return sl2&&S.claims.some(c=>c.slot_id===sl2.id&&c.participant_index===pi);
+    }).length;
+    if(pickedInGroup>=g.maxPicks)return true;
+  }
+  return false;
+}
+function isValidTok(){
+  const ut=getTok();
+  if(!ut||!S.draft?.current_token)return false;
+  const ti=parseInt(ut.split('-')[0]);
+  return ut===S.draft.current_token&&ti===S.draft.current_pick_index;
+}
+function isRO(){const ut=getTok();if(!ut)return true;return!isValidTok();}
+function getTok(){return new URLSearchParams(window.location.search).get('token');}
+function genToken(idx){return`${idx}-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;}
+function genCode(){const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';return Array.from({length:6},()=>c[Math.floor(Math.random()*c.length)]).join('');}
+function buildLink(draft){return`${CFG.appUrl}?draft=${draft.id}&token=${draft.current_token}`;}
+function fmtD(d){if(!d)return'—';return new Date(d+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+
+// ── RENDER BOARD ──
+function renderBoard(){
+  if(!S.draft)return;
+  const done=isDone();
+  const cpi=S.draft.current_pick_index;
+  const cpi_part=pAtIdx(cpi);
+  const curP=S.participants[cpi_part];
+  const rnd=roundNum(cpi);
+  const n=S.participants.length;
+  const pip=(cpi%n)+1;
+
+  document.getElementById('dTitleEl').textContent=S.draft.name||'Vacation Draft';
+  document.getElementById('dBadge').textContent=done?'Complete':`Round ${rnd}`;
+
+  const totalSpots=S.slots.reduce((s,sl)=>s+sl.max_people,0);
+  const filled=S.claims.length;
+  const pct=totalSpots?Math.round(filled/totalSpots*100):0;
+  document.getElementById('dProgFill').style.width=pct+'%';
+  document.getElementById('dProgTxt').textContent=`${filled} / ${totalSpots} filled`;
+
+  const ba=document.getElementById('bannerArea');
+  if(done){
+    ba.innerHTML=`<div class="complete-banner"><h2>🏖 Draft Complete!</h2><p>All vacation periods are filled. Check your email for the full schedule.</p></div>`;
+  }else if(!isRO()&&curP){
+    const nextPIdx2=pAtIdx(cpi+1);
+    const nextP2=S.participants[nextPIdx2];
+    const onDeckHtml=(!done&&nextP2&&nextP2.name!==curP.name)?`
+      <div class="on-deck-strip">
+        <div class="on-deck-lbl">On Deck</div>
+        <div class="on-deck-person">
+          <div class="on-deck-av" style="background:${nextP2.color||'#888'}">${nextP2.name?.[0]||'?'}</div>
+          <div class="on-deck-name">${nextP2.name}</div>
+        </div>
+      </div>`:'';
+    ba.innerHTML=`<div class="turn-banner">
+      <div class="t-lbl">Now Drafting</div>
+      <div class="t-person">
+        <div class="t-av" style="background:${curP.color||'#888'}">${curP.name?.[0]||'?'}</div>
+        <div><div class="t-name">${curP.name||'—'}</div><div class="t-sub">Round ${rnd} · Pick ${pip} of ${n}</div></div>
+      </div>
+      <div class="t-actions"><button class="btn-skip" onclick="skipTurn()">⏭ Skip my turn</button></div>
+    </div>${onDeckHtml}`;
+  }else if(curP){
+    const nextPIdx2=pAtIdx(cpi+1);
+    const nextP2=S.participants[nextPIdx2];
+    const onDeckHtml=(!done&&nextP2&&nextP2.name!==curP.name)?`
+      <div class="on-deck-strip">
+        <div class="on-deck-lbl">On Deck</div>
+        <div class="on-deck-person">
+          <div class="on-deck-av" style="background:${nextP2.color||'#888'}">${nextP2.name?.[0]||'?'}</div>
+          <div class="on-deck-name">${nextP2.name}</div>
+        </div>
+      </div>`:'';
+    ba.innerHTML=`<div class="ro-banner"><span style="font-size:1.1rem">👁</span><span>Watching — it's <strong>${curP.name}'s</strong> turn. Check your email when it's yours.</span></div>${onDeckHtml}`;
+  }
+
+  // Slots
+  document.getElementById('slotsGrid').innerHTML=S.slots.map(sl=>{
+    const slC=S.claims.filter(c=>c.slot_id===sl.id);
+    const full=slC.length>=sl.max_people;
+    const mine=!done&&slC.some(c=>c.participant_index===cpi_part);
+    const excBlocked=!done&&!mine&&!full&&isExcBlocked(sl,cpi_part);
+    const canSel=!isRO()&&!done&&!full&&!mine&&!excBlocked;
+    let cls='d-slot';
+    if(mine)cls+=' claimed';else if(full)cls+=' full';else if(excBlocked)cls+=' blocked';else if(!done&&!isRO())cls+=' avail';
+    const spots=[...Array(sl.max_people)].map((_,i)=>{
+      if(i<slC.length){const pp=S.participants[slC[i].participant_index];return`<div class="spot filled" style="background:${pp?.color||'#888'};border-color:transparent">${pp?.name?.[0]||'?'}</div>`;}
+      return`<div class="spot empty">+</div>`;
+    }).join('');
+    const rem=sl.max_people-slC.length;
+    const sc=full?'var(--text-dim)':mine?'var(--teal)':excBlocked?'var(--text-dim)':rem===1?'var(--accent)':'var(--teal)';
+    const st=full?'Full':mine?'✓ Claimed':excBlocked?'Not available (exclusion)': `${rem} spot${rem!==1?'s':''} left`;
+    const mb=sl.max_people>4?`<div class="max-badge">★ ${sl.max_people}</div>`:'';
+    return`<div class="${cls}" onclick="${canSel?`openModal('${sl.id}')`:''}" style="${full||(!canSel&&!mine)?'':'cursor:pointer'}">
+      ${mb}
+      <div class="d-slot-lbl">${sl.label}</div>
+      <div class="d-slot-dates">${fmtD(sl.start_date)} – ${fmtD(sl.end_date)}</div>
+      <div class="spots-row">${spots}</div>
+      <div class="slot-stat"><div class="stat-dot" style="background:${sc}"></div><span style="color:${sc}">${st}</span></div>
+    </div>`;
+  }).join('');
+
+  // History
+  const hl=document.getElementById('histList');
+  if(!S.claims.length){hl.innerHTML='<div style="color:var(--text-dim);font-size:0.82rem;padding:6px 0">No picks yet</div>';}
+  else{hl.innerHTML=[...S.claims].reverse().map(c=>{
+    const p=S.participants[c.participant_index];
+    const sl=S.slots.find(s=>s.id===c.slot_id);
+    return`<div class="hist-item"><div class="hist-av" style="background:${p?.color||'#888'}">${p?.name?.[0]||'?'}</div><div class="hist-info"><div class="hist-name">${p?.name||'—'}</div><div class="hist-slot">${sl?.label||'—'}</div></div><div class="hist-pick">#${c.pick_number}</div></div>`;
+  }).join('');}
+
+  if(done&&S.draft&&!S.draft.completion_sent)triggerCompletion();
+}
+
+// ── PICK ──
+function openModal(slotId){
+  const sl=S.slots.find(s=>s.id===slotId);if(!sl)return;
+  const cpi=S.draft.current_pick_index;
+  const cpi_p=pAtIdx(cpi);const curP=S.participants[cpi_p];
+  const nextPi=pAtIdx(cpi+1);const nextP=S.participants[nextPi];
+  const slC=S.claims.filter(c=>c.slot_id===slotId);
+  if(isExcBlocked(sl, pAtIdx(S.draft.current_pick_index))){showToast('This period is excluded — you already picked from this group','error');return;}
+  S.pendingSlotId=slotId;
+  document.getElementById('mSub').textContent=`${curP?.name} is claiming a vacation period`;
+  document.getElementById('mSlotNm').textContent=sl.label;
+  document.getElementById('mSlotDt').textContent=`${fmtD(sl.start_date)} – ${fmtD(sl.end_date)}`;
+  document.getElementById('mPickerEmail').value=curP?.email||'';
+  document.getElementById('mNextEmail').value=nextP?.email||'(Draft ends after this)';
+  document.getElementById('mSpots').innerHTML=[...Array(sl.max_people)].map((_,i)=>{
+    if(i<slC.length){const pp=S.participants[slC[i].participant_index];return`<div class="spot filled" style="background:${pp?.color||'#888'};border-color:transparent">${pp?.name?.[0]||'?'}</div>`;}
+    if(i===slC.length)return`<div class="spot filled" style="background:${curP?.color||'#888'};opacity:0.5">${curP?.name?.[0]||'?'}</div>`;
+    return`<div class="spot empty">+</div>`;
+  }).join('');
+  document.getElementById('pickModal').classList.add('active');
+}
+
+function closeModal(){document.getElementById('pickModal').classList.remove('active');S.pendingSlotId=null;}
+
+async function confirmPick(){
+  if(!S.pendingSlotId||!S.draft)return;
+  const sl=S.slots.find(s=>s.id===S.pendingSlotId);
+  const cpi=S.draft.current_pick_index;
+  const cpiP=pAtIdx(cpi);const curP=S.participants[cpiP];
+  const rnd=roundNum(cpi);
+
+  await sb.post('claims',{draft_id:S.draft.id,slot_id:sl.id,participant_index:cpiP,pick_number:S.draft.total_picks+1,round_number:rnd});
+
+  // Find next valid picker
+  let npi=cpi+1;let safety=0;
+  const tmpC=[...S.claims,{slot_id:sl.id,participant_index:cpiP}];
+  while(safety<200){
+    const np2=pAtIdx(npi);
+    const can=S.slots.some(s2=>{const cnt=tmpC.filter(c=>c.slot_id===s2.id).length;const mine=tmpC.some(c=>c.slot_id===s2.id&&c.participant_index===np2);return cnt<s2.max_people&&!mine;});
+    if(can)break;npi++;safety++;
+  }
+
+  const newTok=genToken(npi);
+  await sb.patch('drafts',`?id=eq.${S.draft.id}`,{current_pick_index:npi,total_picks:S.draft.total_picks+1,current_token:newTok,turn_started_at:new Date().toISOString()});
+
+  await loadState(S.draft.id);
+  closeModal();renderBoard();
+
+  const done=isDone();
+  if(!done){
+    const nxtP=S.participants[pAtIdx(npi)];
+    if(nxtP?.email){
+      const lnk=`${CFG.appUrl}?draft=${S.draft.id}&token=${newTok}`;
+      await sendEmail({to:nxtP.email,toName:nxtP.name,subject:`🏝 ${S.draft.name} — It's your turn, ${nxtP.name.split(' ')[0]}!`,body:buildTurnBody(nxtP,curP,sl,S.draft,'pick',lnk)});
+      if(curP?.email!==S.draft.admin_email&&nxtP?.email!==S.draft.admin_email){
+        await sendEmail({to:S.draft.admin_email,toName:'Admin',subject:`🏝 ${S.draft.name} — ${curP.name} picked ${sl.label}`,body:`${curP.name} selected ${sl.label} (${fmtD(sl.start_date)} – ${fmtD(sl.end_date)}).\n\nNext: ${nxtP.name}\n\nView: ${CFG.appUrl}?draft=${S.draft.id}`});
+      }
+    }
+    showToast(`${curP?.name?.split(' ')[0]} picked ${sl.label}!`,'success');
+  }else{showToast('Draft complete! 🎉','success');}
+}
+
+async function skipTurn(){
+  if(!S.draft||isDone())return;
+  const cpi=S.draft.current_pick_index;const curP=S.participants[pAtIdx(cpi)];
+  const npi=cpi+1;const newTok=genToken(npi);
+  await sb.patch('drafts',`?id=eq.${S.draft.id}`,{current_pick_index:npi,current_token:newTok,turn_started_at:new Date().toISOString()});
+  await loadState(S.draft.id);renderBoard();
+  const nxtP=S.participants[pAtIdx(npi)];
+  if(nxtP?.email){
+    const lnk=`${CFG.appUrl}?draft=${S.draft.id}&token=${newTok}`;
+    await sendEmail({to:nxtP.email,toName:nxtP.name,subject:`🏝 ${S.draft.name} — It's your turn, ${nxtP.name.split(' ')[0]}!`,body:buildTurnBody(nxtP,curP,null,S.draft,'skip',lnk)});
+  }
+  showToast(`${curP?.name?.split(' ')[0]} skipped. ${nxtP?.name?.split(' ')[0]} is up.`,'success');
+}
+
+// ── COMPLETION ──
+async function triggerCompletion(){
+  await sb.patch('drafts',`?id=eq.${S.draft.id}`,{completion_sent:true});
+  const sched=S.slots.map(sl=>{
+    const names=S.claims.filter(c=>c.slot_id===sl.id).map(c=>S.participants[c.participant_index]?.name||'—');
+    return`${sl.label} (${fmtD(sl.start_date)} – ${fmtD(sl.end_date)})\n${names.map(n=>`   - ${n}`).join('\n')||'   (no one)'}`;
+  }).join('\n\n');
+
+  for(const p of S.participants){
+    if(!p?.email)continue;
+    const pi=S.participants.indexOf(p);
+    const myPicks=S.claims.filter(c=>c.participant_index===pi).map(c=>{const sl=S.slots.find(s=>s.id===c.slot_id);return`• ${sl?.label} (${fmtD(sl?.start_date)} – ${fmtD(sl?.end_date)})`;}).join('\n')||'No selections.';
+    await sendEmail({
+      to:p.email,toName:p.name,
+      subject:`🏖 ${S.draft.name} — Draft Complete! Final Schedule`,
+      body:`Hi ${p.name.split(' ')[0]},\n\nThe ${S.draft.name} is complete!\n\nYOUR SELECTIONS:\n${myPicks}\n\nFULL GROUP SCHEDULE:\n\n${sched}\n\nView: ${CFG.appUrl}?draft=${S.draft.id}\n\n— ${S.draft.name}`,
+    });
+    await sleep(600);
+  }
+  if(S.draft.admin_email){
+    await sendEmail({
+      to:S.draft.admin_email,toName:'Admin',
+      subject:`🏖 ${S.draft.name} — Complete! Admin Summary`,
+      body:`The ${S.draft.name} is complete.\n\nFULL SCHEDULE:\n\n${sched}\n\n— ${S.draft.name}`,
+    });
+  }
+}
+
+// ── EMAIL ──
+async function sendEmail({to,toName,subject,body}){
+  if(!to?.includes('@'))return;
+  try{
+    console.log('📧 Sending email to',to,'via /api/send-email');
+    const r=await fetch('/api/send-email',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({to,toName,subject,body}),
+    });
+    const d=await r.json();
+    if(!r.ok){console.error('Email error:',d);showToast('⚠️ Email failed: '+JSON.stringify(d),'error');}
+    else console.log('✅ Email sent to',to);
+    return d;
+  }catch(e){console.error('Email failed:',e);showToast('⚠️ Email error: '+e.message,'error');}
+}
+
+function buildTurnBody(recipient,picker,slot,draft,ctx,link){
+  const fn=recipient.name.split(' ')[0];
+  let b=`Hi ${fn},\n\n`;
+  if(ctx==='launch')b+=`The ${draft.name} has started — you have the first pick!\n\n`;
+  else if(ctx==='pick'&&picker&&slot)b+=`${picker.name} selected ${slot.label} (${fmtD(slot.start_date)} – ${fmtD(slot.end_date)}).\n\nIt's your turn!\n\n`;
+  else if(ctx==='skip'&&picker)b+=`${picker.name} skipped their turn.\n\nIt's now your turn!\n\n`;
+  if(link)b+=`👉 Make your pick: ${link}\n\n`;
+  b+=`— ${draft.name}`;
+  return b;
+}
+
+// ── TOAST ──
+let tt;
+function showToast(msg,type='success'){
+  clearTimeout(tt);
+  const t=document.getElementById('toast');
+  document.getElementById('toastMsg').textContent=msg;
+  t.className='toast show '+type;
+  tt=setTimeout(()=>t.classList.remove('show'),3800);
+}
+
+// ── PWA ──
+let dp;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();dp=e;if(!localStorage.getItem('instDismissed'))document.getElementById('installBanner').style.display='flex';});
+function installPWA(){if(dp){dp.prompt();dp.userChoice.then(()=>{dp=null;document.getElementById('installBanner').style.display='none';});}}
+function dismissInstall(){localStorage.setItem('instDismissed','1');document.getElementById('installBanner').style.display='none';}
+
+// ── INIT ──
+async function init(){
+  const params=new URLSearchParams(window.location.search);
+  const draftId=params.get('draft');
+  const token=params.get('token');
+  if(draftId){
+    document.getElementById('loadingScreen').style.display='flex';
+    try{
+      await loadState(draftId);
+      document.getElementById('loadingScreen').style.display='none';
+      showScreen('draftScreen');startPoll(draftId);renderBoard();
+      if(token&&isValidTok()){
+        const p=S.participants[pAtIdx(S.draft.current_pick_index)];
+        if(p)showToast(`Welcome, ${p.name.split(' ')[0]}! It's your turn 🏝`,'success');
+      }else if(token){
+        showToast('This link may have expired — viewing draft','success');
+      }
+    }catch(e){
+      document.getElementById('loadingScreen').style.display='none';
+      showScreen('landingScreen');showToast('Could not load draft','error');
+    }
+  }else{
+    document.getElementById('loadingScreen').style.display='none';
+    showScreen('landingScreen');
+  }
+}
+
+init();
+
 // ── RANGE CALENDAR PICKER ──
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS=['Su','Mo','Tu','We','Th','Fr','Sa'];
