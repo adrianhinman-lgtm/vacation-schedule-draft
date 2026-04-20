@@ -11,6 +11,79 @@
 <meta name="description" content="Fair vacation scheduling through snake-order drafting">
 <link rel="manifest" href="manifest.json">
 <title>Vacation Schedule Draft</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js">
+// ── EXCEL EXPORT ──
+function exportToExcel(){
+  if(!S.draft||!XLSX)return;
+  const wb=XLSX.utils.book_new();
+  const draftName=S.draft.name||'Vacation Draft';
+
+  // ── Sheet 1: Full Schedule ──
+  const schedData=[
+    [draftName + ' — Full Schedule'],
+    ['Generated: '+new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})],
+    [],
+    ['Date Period','Start Date','End Date','Days','Capacity','Who Selected'],
+  ];
+  S.slots.forEach(sl=>{
+    const claimants=S.claims.filter(c=>c.slot_id===sl.id)
+      .sort((a,b)=>a.pick_number-b.pick_number)
+      .map(c=>S.participants[c.participant_index]?.name||'—')
+      .join(', ')||'—';
+    const start=new Date(sl.start_date+'T12:00:00');
+    const end=new Date(sl.end_date+'T12:00:00');
+    const days=Math.round((end-start)/86400000)+1;
+    schedData.push([sl.label,fmtD(sl.start_date),fmtD(sl.end_date),days,sl.max_people,claimants]);
+  });
+  const ws1=XLSX.utils.aoa_to_sheet(schedData);
+  // Column widths
+  ws1['!cols']=[{wch:24},{wch:14},{wch:14},{wch:7},{wch:10},{wch:50}];
+  // Merge title row
+  ws1['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:5}}];
+  XLSX.utils.book_append_sheet(wb,ws1,'Full Schedule');
+
+  // ── Sheet 2: Per Person Summary ──
+  const personData=[
+    [draftName + ' — Individual Selections'],
+    [],
+    ['#','Name','Email','Selections','Total Picks'],
+  ];
+  S.participants.forEach((p,pi)=>{
+    const myPicks=S.claims.filter(c=>c.participant_index===pi)
+      .sort((a,b)=>a.pick_number-b.pick_number)
+      .map(c=>S.slots.find(s=>s.id===c.slot_id)?.label||'—')
+      .join(', ')||'None';
+    const count=S.claims.filter(c=>c.participant_index===pi).length;
+    personData.push([pi+1,p.name,p.email||'',myPicks,count]);
+  });
+  const ws2=XLSX.utils.aoa_to_sheet(personData);
+  ws2['!cols']=[{wch:5},{wch:22},{wch:30},{wch:60},{wch:12}];
+  ws2['!merges']=[{s:{r:0,c:0},e:{r:0,c:4}}];
+  XLSX.utils.book_append_sheet(wb,ws2,'Individual Selections');
+
+  // ── Sheet 3: Pick History ──
+  const histData=[
+    [draftName + ' — Pick History'],
+    [],
+    ['Pick #','Round','Person','Date Period','Start Date','End Date'],
+  ];
+  S.claims.sort((a,b)=>a.pick_number-b.pick_number).forEach(cl=>{
+    const p=S.participants[cl.participant_index];
+    const sl=S.slots.find(s=>s.id===cl.slot_id);
+    histData.push([cl.pick_number,cl.round_number,p?.name||'—',sl?.label||'—',fmtD(sl?.start_date),fmtD(sl?.end_date)]);
+  });
+  const ws3=XLSX.utils.aoa_to_sheet(histData);
+  ws3['!cols']=[{wch:8},{wch:8},{wch:22},{wch:24},{wch:14},{wch:14}];
+  ws3['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}}];
+  XLSX.utils.book_append_sheet(wb,ws3,'Pick History');
+
+  // Download
+  const filename=draftName.replace(/[^a-zA-Z0-9\s]/g,'').trim().replace(/\s+/g,'-')+'-results.xlsx';
+  XLSX.writeFile(wb,filename);
+  showToast('Downloaded! 📊','success');
+}
+
+</script>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -325,6 +398,21 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
   font-size:0.9rem;font-weight:700;cursor:pointer;transition:all 0.2s;
 }
 .btn-cancel-confirm:hover{background:#b84030;}
+
+/* Snake turn double pick banner */
+.snake-banner{
+  margin:8px 18px 0;
+  background:linear-gradient(135deg,rgba(201,168,76,0.15),rgba(201,168,76,0.05));
+  border:1px solid var(--gold);
+  border-radius:var(--radius-sm);padding:11px 16px;
+  display:flex;align-items:center;gap:10px;
+  animation:pulseGold 2s infinite;
+}
+@keyframes pulseGold{0%,100%{box-shadow:0 0 0 0 rgba(201,168,76,0.2)}50%{box-shadow:0 0 0 6px rgba(201,168,76,0)}}
+.snake-banner-icon{font-size:1.3rem;flex-shrink:0;}
+.snake-banner-text{flex:1;}
+.snake-banner-title{font-size:0.85rem;font-weight:700;color:var(--gold);margin-bottom:1px;}
+.snake-banner-sub{font-size:0.75rem;color:var(--text-mid);}
 </style>
 </head>
 <body>
@@ -370,6 +458,7 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
       <div style="display:flex;align-items:center;gap:8px;">
         <div class="d-badge" id="dBadge">Round 1</div>
         <button type="button" class="cancel-btn" id="cancelDraftBtn" onclick="showCancelModal()" style="display:none">✕ Cancel Draft</button>
+        <button type="button" class="cancel-btn" id="exportBtn" onclick="exportToExcel()" style="display:none;border-color:var(--teal);color:var(--teal);">⬇ Export</button>
       </div>
     </div>
     <div class="d-prog-row">
@@ -875,6 +964,17 @@ function pAtIdx(idx){
   return round%2===0?base[pos]:base[n-1-pos];
 }
 function roundNum(idx){const n=S.participants.length||1;return Math.floor(idx/n)+1;}
+
+function isSnakeTurn(idx){
+  // Returns true if the person at idx is the same as the person at idx+1
+  // (i.e. they are at the turnaround point of the snake)
+  if(!S.draft||!S.participants.length)return false;
+  const n=S.participants.length;
+  const posInRound=idx%n;
+  // Turnaround: last pick of a round (posInRound === n-1)
+  // OR first pick of a round who would also have been last of previous round
+  return posInRound===n-1;
+}
 function isDone(){
   if(!S.slots.length)return false;
   if(S.slots.every(sl=>{const f=S.claims.filter(c=>c.slot_id===sl.id).length;return f>=sl.max_people;}))return true;
@@ -935,11 +1035,9 @@ function renderBoard(){
   document.getElementById('dTitleEl').textContent=S.draft.name||'Vacation Draft';
   // Show cancel button to admin (identified by URL containing admin token or admin viewing)
   const cancelBtn=document.getElementById('cancelDraftBtn');
-  if(cancelBtn){
-    const isAdmin=S.draft?.admin_email&&S.participants.some(p=>p.email===S.draft.admin_email&&S.claims.length>=0);
-    // Show cancel button if not done and user appears to be admin (we check loosely)
-    cancelBtn.style.display=(!done&&S.draft?.cancel_code)?'':'none';
-  }
+  if(cancelBtn) cancelBtn.style.display=(!done&&S.draft?.cancel_code)?'':'none';
+  const exportBtn=document.getElementById('exportBtn');
+  if(exportBtn) exportBtn.style.display=done?'':'none';
   document.getElementById('dBadge').textContent=done?'Complete':`Round ${rnd}`;
 
   const totalSpots=S.slots.reduce((s,sl)=>s+sl.max_people,0);
@@ -954,12 +1052,22 @@ function renderBoard(){
   }else if(!isRO()&&curP){
     const nextPIdx2=pAtIdx(cpi+1);
     const nextP2=S.participants[nextPIdx2];
-    const onDeckHtml=(!done&&nextP2&&nextP2.name!==curP.name)?`
+    const snakeTurn=isSnakeTurn(cpi);
+    // On deck: only show if next person is different AND it's not a snake turn
+    const onDeckHtml=(!done&&nextP2&&nextP2.name!==curP.name&&!snakeTurn)?`
       <div class="on-deck-strip">
         <div class="on-deck-lbl">On Deck</div>
         <div class="on-deck-person">
           <div class="on-deck-av" style="background:${nextP2.color||'#888'}">${nextP2.name?.[0]||'?'}</div>
           <div class="on-deck-name">${nextP2.name}</div>
+        </div>
+      </div>`:'';
+    const snakeBannerHtml=snakeTurn&&!done?`
+      <div class="snake-banner">
+        <div class="snake-banner-icon">🐍</div>
+        <div class="snake-banner-text">
+          <div class="snake-banner-title">Snake turn — you pick twice!</div>
+          <div class="snake-banner-sub">You're at the turnaround. After this pick, you go again immediately.</div>
         </div>
       </div>`:'';
     ba.innerHTML=`<div class="turn-banner">
@@ -969,11 +1077,12 @@ function renderBoard(){
         <div><div class="t-name">${curP.name||'—'}</div><div class="t-sub">Round ${rnd} · Pick ${pip} of ${n}</div></div>
       </div>
       <div class="t-actions"><button class="btn-skip" onclick="skipTurn()">⏭ Skip my turn</button></div>
-    </div>${onDeckHtml}`;
+    </div>${snakeBannerHtml}${onDeckHtml}`;
   }else if(curP){
     const nextPIdx2=pAtIdx(cpi+1);
     const nextP2=S.participants[nextPIdx2];
-    const onDeckHtml=(!done&&nextP2&&nextP2.name!==curP.name)?`
+    const snakeTurn=isSnakeTurn(cpi);
+    const onDeckHtml=(!done&&nextP2&&nextP2.name!==curP.name&&!snakeTurn)?`
       <div class="on-deck-strip">
         <div class="on-deck-lbl">On Deck</div>
         <div class="on-deck-person">
@@ -1101,15 +1210,34 @@ async function confirmPick(){
 
   const done=isDone();
   if(!done){
-    const nxtP=S.participants[pAtIdx(npi)];
-    if(nxtP?.email){
-      const lnk=`${CFG.appUrl}?draft=${S.draft.id}&token=${newTok}`;
-      await sendEmail({to:nxtP.email,toName:nxtP.name,subject:`🏝 ${S.draft.name} — It's your turn, ${nxtP.name.split(' ')[0]}!`,body:buildTurnBody(nxtP,curP,sl,S.draft,'pick',lnk)});
-      if(curP?.email!==S.draft.admin_email&&nxtP?.email!==S.draft.admin_email){
-        await sendEmail({to:S.draft.admin_email,toName:'Admin',subject:`🏝 ${S.draft.name} — ${curP.name} picked ${sl.label}`,body:`${curP.name} selected ${sl.label} (${fmtD(sl.start_date)} – ${fmtD(sl.end_date)}).\n\nNext: ${nxtP.name}\n\nView: ${CFG.appUrl}?draft=${S.draft.id}`});
+    const nxtPIdx=pAtIdx(npi);
+    const nxtP=S.participants[nxtPIdx];
+    const wasSnakeTurn=pAtIdx(cpi)===nxtPIdx; // same person picks next
+
+    if(wasSnakeTurn){
+      // Snake turn: same person picks again — no email, board stays unlocked
+      showToast(`${curP?.name?.split(' ')[0]} picked ${sl.label}! Go again — it's still your turn 🐍`,'success');
+      // Admin notification
+      if(curP?.email!==S.draft.admin_email){
+        await sendEmail({to:S.draft.admin_email,toName:'Admin',
+          subject:`🏝 ${S.draft.name} — ${curP.name} picked ${sl.label} (snake turn)`,
+          body:`${curP.name} selected ${sl.label} (${fmtD(sl.start_date)} – ${fmtD(sl.end_date)}).\n\nThis was a snake turn — ${curP.name} picks again immediately.\n\nView: ${CFG.appUrl}?draft=${S.draft.id}`});
       }
+    } else {
+      // Normal turn: email next person
+      if(nxtP?.email){
+        const lnk=`${CFG.appUrl}?draft=${S.draft.id}&token=${newTok}`;
+        await sendEmail({to:nxtP.email,toName:nxtP.name,
+          subject:`🏝 ${S.draft.name} — It's your turn, ${nxtP.name.split(' ')[0]}!`,
+          body:buildTurnBody(nxtP,curP,sl,S.draft,'pick',lnk)});
+        if(curP?.email!==S.draft.admin_email&&nxtP?.email!==S.draft.admin_email){
+          await sendEmail({to:S.draft.admin_email,toName:'Admin',
+            subject:`🏝 ${S.draft.name} — ${curP.name} picked ${sl.label}`,
+            body:`${curP.name} selected ${sl.label} (${fmtD(sl.start_date)} – ${fmtD(sl.end_date)}).\n\nNext: ${nxtP.name}\n\nView: ${CFG.appUrl}?draft=${S.draft.id}`});
+        }
+      }
+      showToast(`${curP?.name?.split(' ')[0]} picked ${sl.label}! ${nxtP?.name?.split(' ')[0]} is up.`,'success');
     }
-    showToast(`${curP?.name?.split(' ')[0]} picked ${sl.label}!`,'success');
   }else{showToast('Draft complete! 🎉','success');}
 }
 
@@ -1664,6 +1792,78 @@ View the draft board: ${CFG.appUrl}?draft=${draft.id}
 — ${draft.name}`;
 }
 
+
+// ── EXCEL EXPORT ──
+function exportToExcel(){
+  if(!S.draft||!XLSX)return;
+  const wb=XLSX.utils.book_new();
+  const draftName=S.draft.name||'Vacation Draft';
+
+  // ── Sheet 1: Full Schedule ──
+  const schedData=[
+    [draftName + ' — Full Schedule'],
+    ['Generated: '+new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})],
+    [],
+    ['Date Period','Start Date','End Date','Days','Capacity','Who Selected'],
+  ];
+  S.slots.forEach(sl=>{
+    const claimants=S.claims.filter(c=>c.slot_id===sl.id)
+      .sort((a,b)=>a.pick_number-b.pick_number)
+      .map(c=>S.participants[c.participant_index]?.name||'—')
+      .join(', ')||'—';
+    const start=new Date(sl.start_date+'T12:00:00');
+    const end=new Date(sl.end_date+'T12:00:00');
+    const days=Math.round((end-start)/86400000)+1;
+    schedData.push([sl.label,fmtD(sl.start_date),fmtD(sl.end_date),days,sl.max_people,claimants]);
+  });
+  const ws1=XLSX.utils.aoa_to_sheet(schedData);
+  // Column widths
+  ws1['!cols']=[{wch:24},{wch:14},{wch:14},{wch:7},{wch:10},{wch:50}];
+  // Merge title row
+  ws1['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:5}}];
+  XLSX.utils.book_append_sheet(wb,ws1,'Full Schedule');
+
+  // ── Sheet 2: Per Person Summary ──
+  const personData=[
+    [draftName + ' — Individual Selections'],
+    [],
+    ['#','Name','Email','Selections','Total Picks'],
+  ];
+  S.participants.forEach((p,pi)=>{
+    const myPicks=S.claims.filter(c=>c.participant_index===pi)
+      .sort((a,b)=>a.pick_number-b.pick_number)
+      .map(c=>S.slots.find(s=>s.id===c.slot_id)?.label||'—')
+      .join(', ')||'None';
+    const count=S.claims.filter(c=>c.participant_index===pi).length;
+    personData.push([pi+1,p.name,p.email||'',myPicks,count]);
+  });
+  const ws2=XLSX.utils.aoa_to_sheet(personData);
+  ws2['!cols']=[{wch:5},{wch:22},{wch:30},{wch:60},{wch:12}];
+  ws2['!merges']=[{s:{r:0,c:0},e:{r:0,c:4}}];
+  XLSX.utils.book_append_sheet(wb,ws2,'Individual Selections');
+
+  // ── Sheet 3: Pick History ──
+  const histData=[
+    [draftName + ' — Pick History'],
+    [],
+    ['Pick #','Round','Person','Date Period','Start Date','End Date'],
+  ];
+  S.claims.sort((a,b)=>a.pick_number-b.pick_number).forEach(cl=>{
+    const p=S.participants[cl.participant_index];
+    const sl=S.slots.find(s=>s.id===cl.slot_id);
+    histData.push([cl.pick_number,cl.round_number,p?.name||'—',sl?.label||'—',fmtD(sl?.start_date),fmtD(sl?.end_date)]);
+  });
+  const ws3=XLSX.utils.aoa_to_sheet(histData);
+  ws3['!cols']=[{wch:8},{wch:8},{wch:22},{wch:24},{wch:14},{wch:14}];
+  ws3['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}}];
+  XLSX.utils.book_append_sheet(wb,ws3,'Pick History');
+
+  // Download
+  const filename=draftName.replace(/[^a-zA-Z0-9\s]/g,'').trim().replace(/\s+/g,'-')+'-results.xlsx';
+  XLSX.writeFile(wb,filename);
+  showToast('Downloaded! 📊','success');
+}
+
 </script>
 <script>
 if ('serviceWorker' in navigator) {
@@ -1917,6 +2117,78 @@ This code is only sent to you. Keep it private.
 View the draft board: ${CFG.appUrl}?draft=${draft.id}
 
 — ${draft.name}`;
+}
+
+
+// ── EXCEL EXPORT ──
+function exportToExcel(){
+  if(!S.draft||!XLSX)return;
+  const wb=XLSX.utils.book_new();
+  const draftName=S.draft.name||'Vacation Draft';
+
+  // ── Sheet 1: Full Schedule ──
+  const schedData=[
+    [draftName + ' — Full Schedule'],
+    ['Generated: '+new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})],
+    [],
+    ['Date Period','Start Date','End Date','Days','Capacity','Who Selected'],
+  ];
+  S.slots.forEach(sl=>{
+    const claimants=S.claims.filter(c=>c.slot_id===sl.id)
+      .sort((a,b)=>a.pick_number-b.pick_number)
+      .map(c=>S.participants[c.participant_index]?.name||'—')
+      .join(', ')||'—';
+    const start=new Date(sl.start_date+'T12:00:00');
+    const end=new Date(sl.end_date+'T12:00:00');
+    const days=Math.round((end-start)/86400000)+1;
+    schedData.push([sl.label,fmtD(sl.start_date),fmtD(sl.end_date),days,sl.max_people,claimants]);
+  });
+  const ws1=XLSX.utils.aoa_to_sheet(schedData);
+  // Column widths
+  ws1['!cols']=[{wch:24},{wch:14},{wch:14},{wch:7},{wch:10},{wch:50}];
+  // Merge title row
+  ws1['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:5}}];
+  XLSX.utils.book_append_sheet(wb,ws1,'Full Schedule');
+
+  // ── Sheet 2: Per Person Summary ──
+  const personData=[
+    [draftName + ' — Individual Selections'],
+    [],
+    ['#','Name','Email','Selections','Total Picks'],
+  ];
+  S.participants.forEach((p,pi)=>{
+    const myPicks=S.claims.filter(c=>c.participant_index===pi)
+      .sort((a,b)=>a.pick_number-b.pick_number)
+      .map(c=>S.slots.find(s=>s.id===c.slot_id)?.label||'—')
+      .join(', ')||'None';
+    const count=S.claims.filter(c=>c.participant_index===pi).length;
+    personData.push([pi+1,p.name,p.email||'',myPicks,count]);
+  });
+  const ws2=XLSX.utils.aoa_to_sheet(personData);
+  ws2['!cols']=[{wch:5},{wch:22},{wch:30},{wch:60},{wch:12}];
+  ws2['!merges']=[{s:{r:0,c:0},e:{r:0,c:4}}];
+  XLSX.utils.book_append_sheet(wb,ws2,'Individual Selections');
+
+  // ── Sheet 3: Pick History ──
+  const histData=[
+    [draftName + ' — Pick History'],
+    [],
+    ['Pick #','Round','Person','Date Period','Start Date','End Date'],
+  ];
+  S.claims.sort((a,b)=>a.pick_number-b.pick_number).forEach(cl=>{
+    const p=S.participants[cl.participant_index];
+    const sl=S.slots.find(s=>s.id===cl.slot_id);
+    histData.push([cl.pick_number,cl.round_number,p?.name||'—',sl?.label||'—',fmtD(sl?.start_date),fmtD(sl?.end_date)]);
+  });
+  const ws3=XLSX.utils.aoa_to_sheet(histData);
+  ws3['!cols']=[{wch:8},{wch:8},{wch:22},{wch:24},{wch:14},{wch:14}];
+  ws3['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}}];
+  XLSX.utils.book_append_sheet(wb,ws3,'Pick History');
+
+  // Download
+  const filename=draftName.replace(/[^a-zA-Z0-9\s]/g,'').trim().replace(/\s+/g,'-')+'-results.xlsx';
+  XLSX.writeFile(wb,filename);
+  showToast('Downloaded! 📊','success');
 }
 
 </script>
