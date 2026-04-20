@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/reminder-check",
-      "schedule": "0 * * * *"
+      "schedule": "0 9 * * *"
     }
   ],
   "headers": [
