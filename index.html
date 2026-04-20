@@ -716,37 +716,45 @@ async function launchDraft(){
     const baseOrder = W.randomizeOrder ? shuffle([...Array(n).keys()]) : [...Array(n).keys()];
     console.log('Draft order:', W.randomizeOrder ? 'randomized' : 'as entered', baseOrder);
 
-    // Map slot indices to actual slot IDs for the exclusion groups
-    const savedSlots = await sbGetSlots(draft.id);
-    const validExclGroups=W.exclusionGroups
-      .filter(g=>g.slotIndices.length>=2)
-      .map(g=>({
-        name: g.name||'Exclusion Group',
-        maxPicks: g.maxPicks||1,
-        slotIds: g.slotIndices.map(si=>{
-          const label=W.slots[si]?.label;
-          return savedSlots.find(s=>s.label===label)?.id;
-        }).filter(Boolean),
-      }))
-      .filter(g=>g.slotIds.length>=2);
+    // Create draft first (no exclusion groups yet — we need slot IDs first)
     const [draft]=await sb.post('drafts',{
       code,name:W.draftName.trim(),admin_email:W.adminEmail.trim(),
       base_order:JSON.stringify(baseOrder),
       current_pick_index:0,total_picks:0,launched:true,completion_sent:false,
       current_token:genToken(0),turn_started_at:new Date().toISOString(),
-      exclusion_groups:JSON.stringify(validExclGroups), // uses slot IDs
+      exclusion_groups:'[]',
     });
 
-    async function sbGetSlots(draftId){
-      return sb.get('slots',`?draft_id=eq.${draftId}&order=sort_order`);
-    }
+    // Create slots
     for(let i=0;i<validSlots.length;i++){
       const s=validSlots[i];
       await sb.post('slots',{draft_id:draft.id,label:s.label,start_date:s.start,end_date:s.end,max_people:s.max,sort_order:i});
     }
+
+    // Create participants
     for(let i=0;i<validPeople.length;i++){
       const p=validPeople[i];
       await sb.post('participants',{draft_id:draft.id,name:p.name.trim(),email:p.email.trim(),sort_order:i,color:COLORS[i%COLORS.length]});
+    }
+
+    // Now fetch saved slots to get their real IDs for exclusion groups
+    if(W.exclusionGroups.filter(g=>g.slotIndices.length>=2).length>0){
+      const savedSlots=await sb.get('slots',`?draft_id=eq.${draft.id}&order=sort_order`);
+      const validExclGroups=W.exclusionGroups
+        .filter(g=>g.slotIndices.length>=2)
+        .map(g=>({
+          name:g.name||'Exclusion Group',
+          maxPicks:g.maxPicks||1,
+          slotIds:g.slotIndices.map(si=>{
+            const label=W.slots[si]?.label;
+            return savedSlots.find(s=>s.label===label)?.id;
+          }).filter(Boolean),
+        }))
+        .filter(g=>g.slotIds.length>=2);
+      // Update draft with exclusion groups
+      await sb.patch('drafts',`?id=eq.${draft.id}`,{
+        exclusion_groups:JSON.stringify(validExclGroups),
+      });
     }
 
     await loadState(draft.id);
