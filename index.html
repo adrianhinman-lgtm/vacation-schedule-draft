@@ -294,6 +294,37 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
   background:var(--accent);color:white;font-family:'Plus Jakarta Sans',sans-serif;
   font-size:0.82rem;font-weight:700;cursor:pointer;
 }
+
+/* Cancel modal */
+.cancel-btn{
+  font-size:0.7rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;
+  color:var(--text-dim);background:none;border:1px solid var(--border);
+  border-radius:20px;padding:4px 12px;cursor:pointer;transition:all 0.2s;
+  white-space:nowrap;
+}
+.cancel-btn:hover{border-color:var(--danger);color:var(--danger);}
+.cancel-modal-box{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius) var(--radius) 0 0;
+  padding:24px 20px calc(var(--safe-bottom) + 24px);
+  width:100%;max-width:480px;
+  transform:translateY(100%);transition:transform 0.3s ease;
+}
+.modal-ov.active .cancel-modal-box{transform:translateY(0);}
+.cancel-code-input{
+  width:100%;background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius-xs);padding:13px 16px;
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:1.1rem;
+  font-weight:700;color:var(--text);outline:none;text-align:center;
+  letter-spacing:0.15em;text-transform:uppercase;margin-bottom:14px;
+}
+.cancel-code-input:focus{border-color:var(--danger);}
+.btn-cancel-confirm{
+  width:100%;padding:13px;border:none;border-radius:var(--radius-xs);
+  background:var(--danger);color:white;font-family:'Plus Jakarta Sans',sans-serif;
+  font-size:0.9rem;font-weight:700;cursor:pointer;transition:all 0.2s;
+}
+.btn-cancel-confirm:hover{background:#b84030;}
 </style>
 </head>
 <body>
@@ -336,7 +367,10 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
   <div class="d-hdr">
     <div class="d-hdr-row">
       <div class="d-title" id="dTitleEl">Vacation <em>Draft</em></div>
-      <div class="d-badge" id="dBadge">Round 1</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="d-badge" id="dBadge">Round 1</div>
+        <button type="button" class="cancel-btn" id="cancelDraftBtn" onclick="showCancelModal()" style="display:none">✕ Cancel Draft</button>
+      </div>
     </div>
     <div class="d-prog-row">
       <div class="d-prog-track"><div class="d-prog-fill" id="dProgFill" style="width:0%"></div></div>
@@ -365,6 +399,19 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
     <button class="btn-primary" onclick="joinDraft()" style="max-width:none;">Join Draft →</button>
   </div>
   <button class="btn-secondary" onclick="showScreen('landingScreen')" style="margin-top:14px;max-width:300px;">← Back</button>
+</div>
+
+
+<!-- CANCEL DRAFT MODAL -->
+<div class="modal-ov" id="cancelModal">
+  <div class="cancel-modal-box">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Cancel Draft</div>
+    <div class="modal-sub">Enter the admin cancellation code from your launch email to cancel this draft. This cannot be undone.</div>
+    <input type="text" class="cancel-code-input" id="cancelCodeInput" placeholder="CANCEL-XXXXXX" maxlength="13">
+    <button type="button" class="btn-cancel-confirm" onclick="confirmCancel()">Cancel This Draft</button>
+    <button type="button" class="btn-m-cancel" onclick="closeCancelModal()" style="width:100%;margin-top:8px;">Never mind</button>
+  </div>
 </div>
 
 <!-- PICK MODAL -->
@@ -723,6 +770,7 @@ async function launchDraft(){
       current_pick_index:0,total_picks:0,launched:true,completion_sent:false,
       current_token:genToken(0),turn_started_at:new Date().toISOString(),
       exclusion_groups:'[]',
+      cancel_code:'CANCEL-'+genCode(),
     });
 
     // Create slots
@@ -770,7 +818,17 @@ async function launchDraft(){
       });
     }
 
-    showToast('Draft launched! Email sent to first picker 📧','success');
+    // Send admin briefing email
+    if(draft.admin_email){
+      await sendEmail({
+        to:draft.admin_email,
+        toName:'Admin',
+        subject:`🏝 ${draft.name} — Admin Guide & Cancellation Code`,
+        body:buildAdminLaunchEmail(draft,validPeople,validSlots),
+      });
+    }
+
+    showToast('Draft launched! Emails sent 📧','success');
     showScreen('draftScreen');
     startPoll(draft.id);
     renderBoard();
@@ -875,6 +933,13 @@ function renderBoard(){
   const pip=(cpi%n)+1;
 
   document.getElementById('dTitleEl').textContent=S.draft.name||'Vacation Draft';
+  // Show cancel button to admin (identified by URL containing admin token or admin viewing)
+  const cancelBtn=document.getElementById('cancelDraftBtn');
+  if(cancelBtn){
+    const isAdmin=S.draft?.admin_email&&S.participants.some(p=>p.email===S.draft.admin_email&&S.claims.length>=0);
+    // Show cancel button if not done and user appears to be admin (we check loosely)
+    cancelBtn.style.display=(!done&&S.draft?.cancel_code)?'':'none';
+  }
   document.getElementById('dBadge').textContent=done?'Complete':`Round ${rnd}`;
 
   const totalSpots=S.slots.reduce((s,sl)=>s+sl.max_people,0);
@@ -1071,10 +1136,6 @@ async function skipTurn(){
 // ── COMPLETION ──
 async function triggerCompletion(){
   await sb.patch('drafts',`?id=eq.${S.draft.id}`,{completion_sent:true});
-  const sched=S.slots.map(sl=>{
-    const names=S.claims.filter(c=>c.slot_id===sl.id).map(c=>S.participants[c.participant_index]?.name||'—');
-    return`${sl.label} (${fmtD(sl.start_date)} – ${fmtD(sl.end_date)})\n${names.map(n=>`   - ${n}`).join('\n')||'   (no one)'}`;
-  }).join('\n\n');
 
   for(let pi=0;pi<S.participants.length;pi++){
     const p=S.participants[pi];
@@ -1082,40 +1143,215 @@ async function triggerCompletion(){
     const myPicksList=S.claims
       .filter(c=>c.participant_index===pi)
       .sort((a,b)=>a.pick_number-b.pick_number)
-      .map(c=>{
-        const sl=S.slots.find(s=>s.id===c.slot_id);
-        return sl?`• ${sl.label} (${fmtD(sl.start_date)} – ${fmtD(sl.end_date)})`:'';
-      })
+      .map(c=>S.slots.find(s=>s.id===c.slot_id))
       .filter(Boolean);
-    const myPicks=myPicksList.length>0
-      ? myPicksList.join('\n')
-      : 'No selections made.';
     console.log(`📧 Completion email for ${p.name} (index ${pi}): ${myPicksList.length} picks`);
     await sendEmail({
       to:p.email,toName:p.name,
-      subject:`🏖 ${S.draft.name} — Draft Complete! Final Schedule`,
-      body:`Hi ${p.name.split(' ')[0]},\n\nThe ${S.draft.name} is complete!\n\nYOUR SELECTIONS:\n${myPicks}\n\nFULL GROUP SCHEDULE:\n\n${sched}\n\nView the draft board: ${CFG.appUrl}?draft=${S.draft.id}\n\n— ${S.draft.name}`,
+      subject:`🏖 ${S.draft.name} — Draft Complete! Your Final Schedule`,
+      body:buildCompletionTextFallback(p,pi,S.draft.name),
+      html:buildCompletionHtml(p,pi,false,S.draft),
     });
     await sleep(600);
   }
   if(S.draft.admin_email){
     await sendEmail({
       to:S.draft.admin_email,toName:'Admin',
-      subject:`🏖 ${S.draft.name} — Complete! Admin Summary`,
-      body:`The ${S.draft.name} is complete.\n\nFULL SCHEDULE:\n\n${sched}\n\n— ${S.draft.name}`,
+      subject:`🏖 ${S.draft.name} — Complete! Full Admin Summary`,
+      body:buildCompletionTextFallback(null,null,S.draft.name),
+      html:buildCompletionHtml(null,null,true,S.draft),
     });
   }
 }
 
+function buildCompletionTextFallback(person,pi,draftName){
+  // Plain text fallback for email clients that don't render HTML
+  let txt=person?`Hi ${person.name.split(' ')[0]},\n\nThe ${draftName} is complete!\n\n`:`The ${draftName} is complete.\n\n`;
+  if(person&&pi!==null){
+    const myPicks=S.claims.filter(c=>c.participant_index===pi).sort((a,b)=>a.pick_number-b.pick_number)
+      .map(c=>{const sl=S.slots.find(s=>s.id===c.slot_id);return sl?`  • ${sl.label} (${fmtD(sl.start_date)} – ${fmtD(sl.end_date)})`:''})
+      .filter(Boolean).join('\n');
+    txt+=`YOUR SELECTIONS:\n${myPicks||'None'}\n\n`;
+  }
+  txt+=`FULL SCHEDULE:\n`;
+  S.slots.forEach(sl=>{
+    const names=S.claims.filter(c=>c.slot_id===sl.id).map(c=>S.participants[c.participant_index]?.name||'—');
+    txt+=`\n${sl.label} (${fmtD(sl.start_date)} – ${fmtD(sl.end_date)})\n${names.map(n=>`  - ${n}`).join('\n')||'  (no one)'}\n`;
+  });
+  txt+=`\nView: ${CFG.appUrl}?draft=${S.draft.id}\n\n— ${S.draft.name}`;
+  return txt;
+}
+
+function buildCompletionHtml(person,pi,isAdmin,draft){
+  const draftName=draft.name;
+  const appLink=`${CFG.appUrl}?draft=${draft.id}`;
+
+  // My picks section
+  let myPicksHtml='';
+  if(person&&pi!==null&&!isAdmin){
+    const mySlots=S.claims
+      .filter(c=>c.participant_index===pi)
+      .sort((a,b)=>a.pick_number-b.pick_number)
+      .map(c=>S.slots.find(s=>s.id===c.slot_id))
+      .filter(Boolean);
+
+    if(mySlots.length>0){
+      const pickRows=mySlots.map(sl=>`
+        <tr>
+          <td style="padding:10px 16px;border-bottom:1px solid #2e2820;">
+            <div style="font-weight:700;color:#f5f0e8;font-size:15px;">${sl.label}</div>
+            <div style="color:#a89880;font-size:13px;margin-top:2px;">${fmtD(sl.start_date)} – ${fmtD(sl.end_date)}</div>
+          </td>
+        </tr>`).join('');
+      myPicksHtml=`
+        <div style="margin-bottom:32px;">
+          <div style="background:#d4854a;color:white;padding:10px 16px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">
+            🎯 Your Selections
+          </div>
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#1c1814;border:1px solid #3a3228;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;">
+            ${pickRows}
+          </table>
+        </div>`;
+    } else {
+      myPicksHtml=`<div style="background:#1c1814;border:1px solid #3a3228;border-radius:8px;padding:16px;margin-bottom:32px;color:#6a5e50;font-size:14px;text-align:center;">No selections made</div>`;
+    }
+  }
+
+  // Full schedule table
+  const schedRows=S.slots.map(sl=>{
+    const slotClaims=S.claims.filter(c=>c.slot_id===sl.id);
+    const claimants=slotClaims.map(c=>{
+      const pp=S.participants[c.participant_index];
+      if(!pp)return'';
+      const initials=pp.name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+      return `<span style="display:inline-flex;align-items:center;gap:6px;background:${pp.color||'#555'};color:white;padding:4px 10px 4px 6px;border-radius:20px;font-size:12px;font-weight:700;margin:2px 3px 2px 0;">
+        <span style="width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,0.2);display:inline-flex;align-items:center;justify-content:center;font-size:10px;">${initials}</span>
+        ${pp.name.split(' ')[0]}
+      </span>`;
+    }).join('');
+
+    const isFull=slotClaims.length>=sl.max_people;
+    const isEmpty=slotClaims.length===0;
+    const statusColor=isFull?'#4a9e8a':isEmpty?'#6a5e50':'#c9a84c';
+    const statusText=isFull?'Full':isEmpty?'No selections':`${slotClaims.length} of ${sl.max_people}`;
+    const myPick=person&&pi!==null&&slotClaims.some(c=>c.participant_index===pi);
+    const rowBg=myPick?'#1e2a1e':'#1c1814';
+    const leftBorder=myPick?'3px solid #4a9e8a':'3px solid transparent';
+
+    return `<tr>
+      <td style="padding:14px 16px;border-bottom:1px solid #2e2820;background:${rowBg};border-left:${leftBorder};">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td>
+              <div style="font-weight:700;color:#f5f0e8;font-size:15px;">${sl.label}</div>
+              <div style="color:#a89880;font-size:12px;margin-top:1px;">${fmtD(sl.start_date)} – ${fmtD(sl.end_date)}</div>
+            </td>
+            <td style="text-align:right;vertical-align:top;">
+              <span style="font-size:11px;font-weight:700;color:${statusColor};background:rgba(0,0,0,0.3);padding:3px 8px;border-radius:20px;">${statusText}</span>
+            </td>
+          </tr>
+          <tr><td colspan="2" style="padding-top:8px;">${claimants||'<span style="color:#6a5e50;font-size:13px;">—</span>'}</td></tr>
+        </table>
+      </td>
+    </tr>`;
+  }).join('');
+
+  // Participant summary table (admin only)
+  let participantSummaryHtml='';
+  if(isAdmin){
+    const pRows=S.participants.map((pp,ppi)=>{
+      const picks=S.claims.filter(c=>c.participant_index===ppi).sort((a,b)=>a.pick_number-b.pick_number)
+        .map(c=>{const sl=S.slots.find(s=>s.id===c.slot_id);return sl?sl.label:''}).filter(Boolean);
+      const initials=pp.name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+      return `<tr>
+        <td style="padding:12px 16px;border-bottom:1px solid #2e2820;">
+          <table cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding-right:12px;vertical-align:top;">
+                <div style="width:36px;height:36px;border-radius:50%;background:${pp.color||'#555'};display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:700;text-align:center;line-height:36px;">${initials}</div>
+              </td>
+              <td>
+                <div style="font-weight:700;color:#f5f0e8;font-size:14px;">${pp.name}</div>
+                <div style="color:#a89880;font-size:12px;margin-top:2px;">${picks.length>0?picks.join(' · '):'No selections'}</div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>`;
+    }).join('');
+    participantSummaryHtml=`
+      <div style="margin-bottom:32px;">
+        <div style="background:#4a4238;color:#a89880;padding:10px 16px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">
+          👥 All Participants
+        </div>
+        <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#1c1814;border:1px solid #3a3228;border-top:none;border-radius:0 0 8px 8px;">
+          ${pRows}
+        </table>
+      </div>`;
+  }
+
+  const greeting=isAdmin
+    ?`<p style="color:#a89880;font-size:15px;line-height:1.6;margin:0 0 28px;">The <strong style="color:#f5f0e8;">${draftName}</strong> is complete. All ${S.claims.length} picks have been made across ${S.slots.length} date periods. Full details below.</p>`
+    :`<p style="color:#a89880;font-size:15px;line-height:1.6;margin:0 0 28px;">Hi <strong style="color:#f5f0e8;">${person?.name.split(' ')[0]}</strong> — the <strong style="color:#f5f0e8;">${draftName}</strong> is complete! Your selections are highlighted below in the full schedule.</p>`;
+
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#0f0d0b;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f0d0b;padding:32px 0;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;">
+
+        <!-- Header -->
+        <tr><td style="background:linear-gradient(135deg,#1c1814,#252018);border-radius:16px 16px 0 0;padding:32px 32px 24px;border:1px solid #3a3228;border-bottom:none;">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#d4854a;margin-bottom:10px;">🏖 Draft Complete</div>
+          <div style="font-size:28px;font-weight:700;color:#f5f0e8;line-height:1.2;margin-bottom:16px;">${draftName}</div>
+          ${greeting}
+          <a href="${appLink}" style="display:inline-block;background:#d4854a;color:white;padding:11px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:700;">View Draft Board →</a>
+        </td></tr>
+
+        <!-- Body -->
+        <tr><td style="background:#0f0d0b;padding:0 0 0 0;">
+          <div style="padding:28px 32px;border:1px solid #3a3228;border-top:none;border-bottom:none;">
+
+            ${myPicksHtml}
+            ${participantSummaryHtml}
+
+            <!-- Full Schedule -->
+            <div style="margin-bottom:32px;">
+              <div style="background:#2e2820;color:#a89880;padding:10px 16px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">
+                📅 Full Group Schedule
+              </div>
+              <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#1c1814;border:1px solid #3a3228;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;">
+                ${schedRows}
+              </table>
+            </div>
+
+          </div>
+        </td></tr>
+
+        <!-- Footer -->
+        <tr><td style="background:#1c1814;border:1px solid #3a3228;border-top:none;border-radius:0 0 16px 16px;padding:20px 32px;text-align:center;">
+          <div style="font-size:12px;color:#6a5e50;margin-bottom:8px;">Sent by Vacation Schedule Draft</div>
+          <a href="${appLink}" style="font-size:12px;color:#d4854a;text-decoration:none;">View live draft board</a>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
 // ── EMAIL ──
-async function sendEmail({to,toName,subject,body}){
+async function sendEmail({to,toName,subject,body,html}){
   if(!to?.includes('@'))return;
   try{
     console.log('📧 Sending email to',to,'via /api/send-email');
     const r=await fetch('/api/send-email',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({to,toName,subject,body}),
+      body:JSON.stringify({to,toName,subject,body,html}),
     });
     const d=await r.json();
     if(!r.ok){console.error('Email error:',d);showToast('⚠️ Email failed: '+JSON.stringify(d),'error');}
@@ -1328,6 +1564,106 @@ function updateRpBtn(i){
   }
 }
 
+
+// ── CANCEL DRAFT ──
+function showCancelModal(){
+  document.getElementById('cancelCodeInput').value='';
+  document.getElementById('cancelModal').classList.add('active');
+}
+function closeCancelModal(){
+  document.getElementById('cancelModal').classList.remove('active');
+}
+
+async function confirmCancel(){
+  const entered=document.getElementById('cancelCodeInput').value.trim().toUpperCase();
+  const expected=(S.draft?.cancel_code||'').toUpperCase();
+  if(!entered){showToast('Enter the cancellation code','error');return;}
+  if(entered!==expected){showToast('Incorrect code — check your admin email','error');return;}
+
+  // Mark draft as cancelled
+  await sb.patch('drafts',`?id=eq.${S.draft.id}`,{
+    launched:false,
+    completion_sent:true, // prevent completion emails
+  });
+
+  // Send cancellation notice to all participants
+  const draftName=S.draft.name;
+  for(const p of S.participants){
+    if(!p?.email)continue;
+    await sendEmail({
+      to:p.email,toName:p.name,
+      subject:`❌ ${draftName} — Draft Cancelled`,
+      body:`Hi ${p.name.split(' ')[0]},\n\nThe ${draftName} has been cancelled by the administrator.\n\nIf you have questions, please contact your admin directly.\n\n— ${draftName}`,
+    });
+    await sleep(400);
+  }
+
+  closeCancelModal();
+  if(S.pollInterval)clearInterval(S.pollInterval);
+  showToast('Draft cancelled. Notifications sent to all participants.','success');
+  setTimeout(()=>showScreen('landingScreen'),2000);
+}
+
+// ── ADMIN LAUNCH EMAIL ──
+function buildAdminLaunchEmail(draft,people,slots){
+  const participantList=people.map((p,i)=>`   ${i+1}. ${p.name}${p.email?' ('+p.email+')':''}`).join('\n');
+  const slotList=slots.map((s,i)=>`   ${i+1}. ${s.label} (${fmtD2(s.start)} – ${fmtD2(s.end)}, max ${s.max} people)`).join('\n');
+
+  return `Hi Admin,
+
+The ${draft.name} has been launched! Here is everything you need to know.
+
+══════════════════════════════════
+HOW THE DRAFT WORKS
+══════════════════════════════════
+
+1. SNAKE ORDER
+   The draft runs in "snake" order. In Round 1, participants pick 1 → ${people.length} in the order listed. In Round 2, it reverses: ${people.length} → 1. Round 3 goes forward again, and so on until all slots are filled or no valid picks remain.
+
+2. MAGIC LINKS
+   Each participant receives a personal email with a unique link when it is their turn. They click the link, see the draft board, and select their vacation period. The link only works for the current drafter — everyone else sees the board in read-only mode.
+
+3. MUTUAL EXCLUSIONS
+   If you set up exclusion groups (e.g. Christmas Week and New Year's Week are mutually exclusive), the system will automatically prevent a participant from selecting more than the allowed number of periods from that group. Blocked slots will appear greyed out when it is their turn.
+
+4. AUTO-SKIP
+   If a participant has no valid picks available (e.g. all remaining slots are either full or blocked by their exclusion choices), the system will automatically skip them and move to the next person. They will not receive a turn email in this case.
+
+5. 24-HOUR REMINDERS
+   If a participant has not made their pick within 24 hours, an automatic reminder email is sent to them and to you.
+
+6. DRAFT COMPLETE
+   When all slots are filled or no one can make any more valid picks, the draft ends automatically. Every participant receives a completion email with their personal selections and the full group schedule.
+
+══════════════════════════════════
+PARTICIPANTS (Draft Order)
+══════════════════════════════════
+
+${participantList}
+
+══════════════════════════════════
+DATE PERIODS
+══════════════════════════════════
+
+${slotList}
+
+══════════════════════════════════
+CANCELLATION CODE (KEEP PRIVATE)
+══════════════════════════════════
+
+If you need to cancel this draft, use the Cancel Draft button on the draft board and enter this code:
+
+   ${draft.cancel_code}
+
+This code is only sent to you. Keep it private.
+
+══════════════════════════════════
+
+View the draft board: ${CFG.appUrl}?draft=${draft.id}
+
+— ${draft.name}`;
+}
+
 </script>
 <script>
 if ('serviceWorker' in navigator) {
@@ -1481,6 +1817,106 @@ function updateRpBtn(i){
     endEl.textContent=s.end?fmtD2(s.end):'Select end date';
     endEl.className='rp-end'+(s.end?'':' empty');
   }
+}
+
+
+// ── CANCEL DRAFT ──
+function showCancelModal(){
+  document.getElementById('cancelCodeInput').value='';
+  document.getElementById('cancelModal').classList.add('active');
+}
+function closeCancelModal(){
+  document.getElementById('cancelModal').classList.remove('active');
+}
+
+async function confirmCancel(){
+  const entered=document.getElementById('cancelCodeInput').value.trim().toUpperCase();
+  const expected=(S.draft?.cancel_code||'').toUpperCase();
+  if(!entered){showToast('Enter the cancellation code','error');return;}
+  if(entered!==expected){showToast('Incorrect code — check your admin email','error');return;}
+
+  // Mark draft as cancelled
+  await sb.patch('drafts',`?id=eq.${S.draft.id}`,{
+    launched:false,
+    completion_sent:true, // prevent completion emails
+  });
+
+  // Send cancellation notice to all participants
+  const draftName=S.draft.name;
+  for(const p of S.participants){
+    if(!p?.email)continue;
+    await sendEmail({
+      to:p.email,toName:p.name,
+      subject:`❌ ${draftName} — Draft Cancelled`,
+      body:`Hi ${p.name.split(' ')[0]},\n\nThe ${draftName} has been cancelled by the administrator.\n\nIf you have questions, please contact your admin directly.\n\n— ${draftName}`,
+    });
+    await sleep(400);
+  }
+
+  closeCancelModal();
+  if(S.pollInterval)clearInterval(S.pollInterval);
+  showToast('Draft cancelled. Notifications sent to all participants.','success');
+  setTimeout(()=>showScreen('landingScreen'),2000);
+}
+
+// ── ADMIN LAUNCH EMAIL ──
+function buildAdminLaunchEmail(draft,people,slots){
+  const participantList=people.map((p,i)=>`   ${i+1}. ${p.name}${p.email?' ('+p.email+')':''}`).join('\n');
+  const slotList=slots.map((s,i)=>`   ${i+1}. ${s.label} (${fmtD2(s.start)} – ${fmtD2(s.end)}, max ${s.max} people)`).join('\n');
+
+  return `Hi Admin,
+
+The ${draft.name} has been launched! Here is everything you need to know.
+
+══════════════════════════════════
+HOW THE DRAFT WORKS
+══════════════════════════════════
+
+1. SNAKE ORDER
+   The draft runs in "snake" order. In Round 1, participants pick 1 → ${people.length} in the order listed. In Round 2, it reverses: ${people.length} → 1. Round 3 goes forward again, and so on until all slots are filled or no valid picks remain.
+
+2. MAGIC LINKS
+   Each participant receives a personal email with a unique link when it is their turn. They click the link, see the draft board, and select their vacation period. The link only works for the current drafter — everyone else sees the board in read-only mode.
+
+3. MUTUAL EXCLUSIONS
+   If you set up exclusion groups (e.g. Christmas Week and New Year's Week are mutually exclusive), the system will automatically prevent a participant from selecting more than the allowed number of periods from that group. Blocked slots will appear greyed out when it is their turn.
+
+4. AUTO-SKIP
+   If a participant has no valid picks available (e.g. all remaining slots are either full or blocked by their exclusion choices), the system will automatically skip them and move to the next person. They will not receive a turn email in this case.
+
+5. 24-HOUR REMINDERS
+   If a participant has not made their pick within 24 hours, an automatic reminder email is sent to them and to you.
+
+6. DRAFT COMPLETE
+   When all slots are filled or no one can make any more valid picks, the draft ends automatically. Every participant receives a completion email with their personal selections and the full group schedule.
+
+══════════════════════════════════
+PARTICIPANTS (Draft Order)
+══════════════════════════════════
+
+${participantList}
+
+══════════════════════════════════
+DATE PERIODS
+══════════════════════════════════
+
+${slotList}
+
+══════════════════════════════════
+CANCELLATION CODE (KEEP PRIVATE)
+══════════════════════════════════
+
+If you need to cancel this draft, use the Cancel Draft button on the draft board and enter this code:
+
+   ${draft.cancel_code}
+
+This code is only sent to you. Keep it private.
+
+══════════════════════════════════
+
+View the draft board: ${CFG.appUrl}?draft=${draft.id}
+
+— ${draft.name}`;
 }
 
 </script>
