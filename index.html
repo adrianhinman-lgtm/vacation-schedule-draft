@@ -990,13 +990,42 @@ async function confirmPick(){
 
   await sb.post('claims',{draft_id:S.draft.id,slot_id:sl.id,participant_index:cpiP,pick_number:S.draft.total_picks+1,round_number:rnd});
 
-  // Find next valid picker
+  // Find next valid picker — respects exclusion blocks and full slots
   let npi=cpi+1;let safety=0;
   const tmpC=[...S.claims,{slot_id:sl.id,participant_index:cpiP}];
-  while(safety<200){
-    const np2=pAtIdx(npi);
-    const can=S.slots.some(s2=>{const cnt=tmpC.filter(c=>c.slot_id===s2.id).length;const mine=tmpC.some(c=>c.slot_id===s2.id&&c.participant_index===np2);return cnt<s2.max_people&&!mine;});
-    if(can)break;npi++;safety++;
+
+  function canPickWithTmp(pi){
+    return S.slots.some(s2=>{
+      const cnt=tmpC.filter(c=>c.slot_id===s2.id).length;
+      const mine=tmpC.some(c=>c.slot_id===s2.id&&c.participant_index===pi);
+      if(cnt>=s2.max_people||mine)return false;
+      // Check exclusion groups using tmpC
+      let groups=[];
+      try{groups=JSON.parse(S.draft.exclusion_groups||'[]');}catch(e){}
+      for(const g of groups){
+        const gIds=g.slotIds||[];
+        if(!gIds.includes(s2.id))continue;
+        const pickedInGroup=gIds.filter(sid=>tmpC.some(c=>c.slot_id===sid&&c.participant_index===pi)).length;
+        if(pickedInGroup>=(g.maxPicks||1))return false;
+      }
+      return true;
+    });
+  }
+
+  // Check if draft is complete with the new claim included
+  const tmpAllFull=S.slots.every(s2=>{
+    const cnt=tmpC.filter(c=>c.slot_id===s2.id).length;
+    return cnt>=s2.max_people;
+  });
+  const tmpAnyoneCanPick=S.participants.some((_,pi)=>canPickWithTmp(pi));
+  const tmpDraftDone=tmpAllFull||!tmpAnyoneCanPick;
+
+  if(!tmpDraftDone){
+    while(safety<200){
+      const np2=pAtIdx(npi);
+      if(canPickWithTmp(np2))break;
+      npi++;safety++;
+    }
   }
 
   const newTok=genToken(npi);
@@ -1022,7 +1051,13 @@ async function confirmPick(){
 async function skipTurn(){
   if(!S.draft||isDone())return;
   const cpi=S.draft.current_pick_index;const curP=S.participants[pAtIdx(cpi)];
-  const npi=cpi+1;const newTok=genToken(npi);
+  // Advance to next person who can actually pick
+  let npi=cpi+1;let safety=0;
+  while(safety<200&&!isDone()){
+    if(canP(pAtIdx(npi)))break;
+    npi++;safety++;
+  }
+  const newTok=genToken(npi);
   await sb.patch('drafts',`?id=eq.${S.draft.id}`,{current_pick_index:npi,current_token:newTok,turn_started_at:new Date().toISOString()});
   await loadState(S.draft.id);renderBoard();
   const nxtP=S.participants[pAtIdx(npi)];
@@ -1041,14 +1076,25 @@ async function triggerCompletion(){
     return`${sl.label} (${fmtD(sl.start_date)} – ${fmtD(sl.end_date)})\n${names.map(n=>`   - ${n}`).join('\n')||'   (no one)'}`;
   }).join('\n\n');
 
-  for(const p of S.participants){
+  for(let pi=0;pi<S.participants.length;pi++){
+    const p=S.participants[pi];
     if(!p?.email)continue;
-    const pi=S.participants.indexOf(p);
-    const myPicks=S.claims.filter(c=>c.participant_index===pi).map(c=>{const sl=S.slots.find(s=>s.id===c.slot_id);return`• ${sl?.label} (${fmtD(sl?.start_date)} – ${fmtD(sl?.end_date)})`;}).join('\n')||'No selections.';
+    const myPicksList=S.claims
+      .filter(c=>c.participant_index===pi)
+      .sort((a,b)=>a.pick_number-b.pick_number)
+      .map(c=>{
+        const sl=S.slots.find(s=>s.id===c.slot_id);
+        return sl?`• ${sl.label} (${fmtD(sl.start_date)} – ${fmtD(sl.end_date)})`:'';
+      })
+      .filter(Boolean);
+    const myPicks=myPicksList.length>0
+      ? myPicksList.join('\n')
+      : 'No selections made.';
+    console.log(`📧 Completion email for ${p.name} (index ${pi}): ${myPicksList.length} picks`);
     await sendEmail({
       to:p.email,toName:p.name,
       subject:`🏖 ${S.draft.name} — Draft Complete! Final Schedule`,
-      body:`Hi ${p.name.split(' ')[0]},\n\nThe ${S.draft.name} is complete!\n\nYOUR SELECTIONS:\n${myPicks}\n\nFULL GROUP SCHEDULE:\n\n${sched}\n\nView: ${CFG.appUrl}?draft=${S.draft.id}\n\n— ${S.draft.name}`,
+      body:`Hi ${p.name.split(' ')[0]},\n\nThe ${S.draft.name} is complete!\n\nYOUR SELECTIONS:\n${myPicks}\n\nFULL GROUP SCHEDULE:\n\n${sched}\n\nView the draft board: ${CFG.appUrl}?draft=${S.draft.id}\n\n— ${S.draft.name}`,
     });
     await sleep(600);
   }
