@@ -1425,8 +1425,42 @@ function renderBoard(){
     const nextPIdx2=pAtIdx(cpi+1);
     const nextP2=S.participants[nextPIdx2];
     const snakeTurn=isSnakeTurn(cpi);
-    // On deck: only show if next person is different AND it's not a snake turn
-    const onDeckHtml=(!done&&nextP2&&nextP2.name!==curP.name&&!snakeTurn)?`
+
+    // Only show snake banner if the person will actually have valid picks for their second turn.
+    // Simulate a pick of ANY slot and check if they can still pick after.
+    // We check using current claims — before confirming a pick — so we look at
+    // whether they can make a second pick assuming they use one slot now.
+    const snakeTurnWithOptions=snakeTurn&&(()=>{
+      if(!S.slots.length)return false;
+      const curPIdx=cpi_part;
+      // Find any slot they could pick now
+      const pickableNow=S.slots.filter(sl2=>{
+        const cnt=S.claims.filter(c=>c.slot_id===sl2.id).length;
+        const mine=S.claims.some(c=>c.slot_id===sl2.id&&c.participant_index===curPIdx);
+        return cnt<sl2.max_people&&!mine&&!isExcBlocked(sl2,curPIdx);
+      });
+      if(!pickableNow.length)return false; // can't even make first pick
+      // Simulate picking one of those slots, then check if they can still pick again
+      const simClaims=[...S.claims,{slot_id:pickableNow[0].id,participant_index:curPIdx}];
+      return S.slots.some(sl2=>{
+        const cnt=simClaims.filter(c=>c.slot_id===sl2.id).length;
+        const mine=simClaims.some(c=>c.slot_id===sl2.id&&c.participant_index===curPIdx);
+        if(cnt>=sl2.max_people||mine)return false;
+        // Check exclusion groups with simulated claims
+        let groups=[];
+        try{groups=JSON.parse(S.draft.exclusion_groups||'[]');}catch(e){}
+        for(const g of groups){
+          const gIds=g.slotIds||[];
+          if(!gIds.includes(sl2.id))continue;
+          const picked=gIds.filter(sid=>simClaims.some(c=>c.slot_id===sid&&c.participant_index===curPIdx)).length;
+          if(picked>=(g.maxPicks||1))return false;
+        }
+        return true;
+      });
+    })();
+
+    // On deck: only show if next person is different AND it's not a real snake turn
+    const onDeckHtml=(!done&&nextP2&&nextP2.name!==curP.name&&!snakeTurnWithOptions)?`
       <div class="on-deck-strip">
         <div class="on-deck-lbl">On Deck</div>
         <div class="on-deck-person">
@@ -1434,7 +1468,7 @@ function renderBoard(){
           <div class="on-deck-name">${nextP2.name}</div>
         </div>
       </div>`:'';
-    const snakeBannerHtml=snakeTurn&&!done?`
+    const snakeBannerHtml=snakeTurnWithOptions&&!done?`
       <div class="snake-banner">
         <div class="snake-banner-icon">🐍</div>
         <div class="snake-banner-text">
