@@ -1377,9 +1377,13 @@ async function confirmPick(){
     const wasSnakeTurn=pAtIdx(cpi)===nxtPIdx; // same person picks next
 
     if(wasSnakeTurn){
-      // Snake turn: same person picks again — no email, board stays unlocked
+      // Snake turn: same person picks again
+      // Update the URL with the new token so isRO() stays false for the next pick
+      const newUrl=new URL(window.location.href);
+      newUrl.searchParams.set('token',newTok);
+      window.history.replaceState({},'',newUrl.toString());
       showToast(`${curP?.name?.split(' ')[0]} picked ${sl.label}! Go again — it's still your turn 🐍`,'success');
-      // Admin notification
+      // Also send the admin notification
       if(curP?.email!==S.draft.admin_email){
         await sendEmail({to:S.draft.admin_email,toName:'Admin',
           subject:`🏝 ${S.draft.name} — ${curP.name} picked ${sl.label} (snake turn)`,
