@@ -83,6 +83,81 @@ function exportToExcel(){
   showToast('Downloaded! 📊','success');
 }
 
+
+// ── RESEND EMAIL ──
+function showResendModal(){
+  document.getElementById('resendCodeInput').value='';
+  document.getElementById('resendTargetArea').style.display='none';
+  document.getElementById('resendVerifyBtn').style.display='';
+  document.getElementById('resendModal').classList.add('active');
+}
+function closeResendModal(){
+  document.getElementById('resendModal').classList.remove('active');
+}
+
+function verifyResendCode(){
+  const entered=document.getElementById('resendCodeInput').value.trim().toUpperCase();
+  const expected=(S.draft?.cancel_code||'').toUpperCase();
+  if(!entered){showToast('Enter your admin code','error');return;}
+  if(entered!==expected){showToast('Incorrect code','error');return;}
+
+  // Code verified — show participant list
+  document.getElementById('resendVerifyBtn').style.display='none';
+  document.getElementById('resendTargetArea').style.display='';
+  
+  const cpi=S.draft.current_pick_index;
+  const curPIdx=pAtIdx(cpi);
+  const list=document.getElementById('resendList');
+
+  list.innerHTML=S.participants.map((p,pi)=>{
+    if(!p.email)return'';
+    const isCurrent=pi===curPIdx;
+    const label=isCurrent?'Current drafter':'Past participant';
+    const btnLabel=isCurrent?'Resend turn email':'Resend draft link';
+    return `<div class="resend-row">
+      <div class="resend-av" style="background:${p.color||'#888'}">${p.name?.[0]||'?'}</div>
+      <div class="resend-info">
+        <div class="resend-name">${p.name}${isCurrent?' 👈':''}</div>
+        <div class="resend-email">${p.email}</div>
+      </div>
+      <button type="button" class="btn-resend" id="resendBtnP${pi}" onclick="doResend(${pi})">${btnLabel}</button>
+    </div>`;
+  }).join('');
+}
+
+async function doResend(pi){
+  const p=S.participants[pi];
+  if(!p?.email)return;
+  const btn=document.getElementById('resendBtnP'+pi);
+  if(btn){btn.disabled=true;btn.textContent='Sending…';}
+
+  const cpi=S.draft.current_pick_index;
+  const curPIdx=pAtIdx(cpi);
+  const isCurrent=pi===curPIdx;
+
+  if(isCurrent){
+    // Resend current turn email with the active magic link
+    const lnk=buildLink(S.draft);
+    await sendEmail({
+      to:p.email,toName:p.name,
+      subject:`🏝 ${S.draft.name} — Reminder: It's your turn to pick!`,
+      body:buildTurnBody(p,null,null,S.draft,'reminder',lnk),
+    });
+    showToast(`Turn email resent to ${p.name.split(' ')[0]} ✓`,'success');
+  } else {
+    // Resend a general draft link (read-only view — no token)
+    const viewLink=`${CFG.appUrl}?draft=${S.draft.id}`;
+    await sendEmail({
+      to:p.email,toName:p.name,
+      subject:`🏝 ${S.draft.name} — View the Draft`,
+      body:`Hi ${p.name.split(' ')[0]},\n\nHere is a link to view the current state of the ${S.draft.name}.\n\n👉 View draft: ${viewLink}\n\nYou will receive your personal pick link by email when it is your turn.\n\n— ${S.draft.name}`,
+    });
+    showToast(`Draft link sent to ${p.name.split(' ')[0]} ✓`,'success');
+  }
+
+  if(btn){btn.disabled=false;btn.textContent='Sent ✓';btn.style.background='var(--teal)';btn.style.color='white';}
+}
+
 </script>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -413,6 +488,46 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
 .snake-banner-text{flex:1;}
 .snake-banner-title{font-size:0.85rem;font-weight:700;color:var(--gold);margin-bottom:1px;}
 .snake-banner-sub{font-size:0.75rem;color:var(--text-mid);}
+
+/* Cancelled draft screen */
+.cancelled-banner{
+  margin:20px 18px;
+  background:linear-gradient(135deg,rgba(212,90,74,0.12),rgba(212,90,74,0.05));
+  border:1px solid var(--danger);border-radius:var(--radius);
+  padding:28px 24px;text-align:center;
+}
+.cancelled-banner-icon{font-size:2.5rem;margin-bottom:14px;}
+.cancelled-banner-title{
+  font-family:'Playfair Display',serif;font-size:1.5rem;
+  color:var(--danger);margin-bottom:8px;
+}
+.cancelled-banner-sub{
+  font-size:0.88rem;color:var(--text-mid);line-height:1.6;
+  max-width:320px;margin:0 auto;
+}
+
+/* Resend email modal */
+.resend-row{
+  display:flex;align-items:center;gap:10px;
+  padding:12px 14px;background:var(--surface2);
+  border:1px solid var(--border);border-radius:var(--radius-sm);
+  margin-bottom:10px;
+}
+.resend-av{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:700;color:white;flex-shrink:0;}
+.resend-info{flex:1;min-width:0;}
+.resend-name{font-size:0.9rem;font-weight:700;color:var(--text);}
+.resend-email{font-size:0.75rem;color:var(--text-dim);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.btn-resend{
+  padding:7px 14px;border:1px solid var(--teal);border-radius:var(--radius-xs);
+  background:var(--teal-light);color:var(--teal);
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:0.78rem;font-weight:700;
+  cursor:pointer;transition:all 0.2s;flex-shrink:0;white-space:nowrap;
+}
+.btn-resend:hover{background:var(--teal);color:white;}
+.btn-resend:disabled{opacity:0.4;cursor:not-allowed;}
+.resend-admin-code{
+  font-size:0.72rem;color:var(--text-dim);margin-bottom:6px;
+}
 </style>
 </head>
 <body>
@@ -459,6 +574,7 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
         <div class="d-badge" id="dBadge">Round 1</div>
         <button type="button" class="cancel-btn" id="cancelDraftBtn" onclick="showCancelModal()" style="display:none">✕ Cancel Draft</button>
         <button type="button" class="cancel-btn" id="exportBtn" onclick="exportToExcel()" style="display:none;border-color:var(--teal);color:var(--teal);">⬇ Export</button>
+        <button type="button" class="cancel-btn" id="resendBtn" onclick="showResendModal()" style="display:none;border-color:var(--teal);color:var(--teal);">📧 Resend</button>
       </div>
     </div>
     <div class="d-prog-row">
@@ -490,6 +606,24 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
   <button class="btn-secondary" onclick="showScreen('landingScreen')" style="margin-top:14px;max-width:300px;">← Back</button>
 </div>
 
+
+
+<!-- RESEND EMAIL MODAL -->
+<div class="modal-ov" id="resendModal">
+  <div class="cancel-modal-box">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Resend Pick Email</div>
+    <div class="modal-sub">Enter your admin code to resend the magic link to the current drafter or any participant.</div>
+    <div class="resend-admin-code">Admin code required to prevent misuse</div>
+    <input type="text" class="cancel-code-input" id="resendCodeInput" placeholder="CANCEL-XXXXXX" maxlength="13" style="margin-bottom:16px;">
+    <div id="resendTargetArea" style="display:none;">
+      <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px;">Select who to resend to:</div>
+      <div id="resendList"></div>
+    </div>
+    <button type="button" class="btn-wiz-next" id="resendVerifyBtn" onclick="verifyResendCode()" style="margin-bottom:10px;">Verify Code →</button>
+    <button type="button" class="btn-m-cancel" onclick="closeResendModal()" style="width:100%;">Cancel</button>
+  </div>
+</div>
 
 <!-- CANCEL DRAFT MODAL -->
 <div class="modal-ov" id="cancelModal">
@@ -975,6 +1109,12 @@ function isSnakeTurn(idx){
   // OR first pick of a round who would also have been last of previous round
   return posInRound===n-1;
 }
+function isCancelled(){
+  // A draft is cancelled if launched is false but it has participants
+  // (distinguishes from a draft that was never launched)
+  return S.draft&&S.draft.launched===false&&S.participants.length>0;
+}
+
 function isDone(){
   if(!S.slots.length)return false;
   if(S.slots.every(sl=>{const f=S.claims.filter(c=>c.slot_id===sl.id).length;return f>=sl.max_people;}))return true;
@@ -1038,6 +1178,8 @@ function renderBoard(){
   if(cancelBtn) cancelBtn.style.display=(!done&&S.draft?.cancel_code)?'':'none';
   const exportBtn=document.getElementById('exportBtn');
   if(exportBtn) exportBtn.style.display=done?'':'none';
+  const resendBtn=document.getElementById('resendBtn');
+  if(resendBtn) resendBtn.style.display=(!done&&!isCancelled()&&S.draft?.cancel_code)?'':'none';
   document.getElementById('dBadge').textContent=done?'Complete':`Round ${rnd}`;
 
   const totalSpots=S.slots.reduce((s,sl)=>s+sl.max_people,0);
@@ -1047,6 +1189,26 @@ function renderBoard(){
   document.getElementById('dProgTxt').textContent=`${filled} / ${totalSpots} filled`;
 
   const ba=document.getElementById('bannerArea');
+
+  // Check cancelled first
+  if(isCancelled()){
+    ba.innerHTML=`
+      <div class="cancelled-banner">
+        <div class="cancelled-banner-icon">❌</div>
+        <div class="cancelled-banner-title">Draft Cancelled</div>
+        <div class="cancelled-banner-sub">This draft has been cancelled by the administrator. Your pick link is no longer active. Please contact your admin for more information.</div>
+      </div>`;
+    // Hide slots and history, stop polling
+    document.getElementById('slotsGrid').innerHTML='';
+    document.getElementById('histList').innerHTML='';
+    if(S.pollInterval){clearInterval(S.pollInterval);S.pollInterval=null;}
+    const cancelBtn=document.getElementById('cancelDraftBtn');
+    if(cancelBtn)cancelBtn.style.display='none';
+    const exportBtn=document.getElementById('exportBtn');
+    if(exportBtn)exportBtn.style.display='none';
+    return;
+  }
+
   if(done){
     ba.innerHTML=`<div class="complete-banner"><h2>🏖 Draft Complete!</h2><p>All vacation periods are filled. Check your email for the full schedule.</p></div>`;
   }else if(!isRO()&&curP){
@@ -1525,12 +1687,18 @@ async function init(){
     try{
       await loadState(draftId);
       document.getElementById('loadingScreen').style.display='none';
-      showScreen('draftScreen');startPoll(draftId);renderBoard();
-      if(token&&isValidTok()){
-        const p=S.participants[pAtIdx(S.draft.current_pick_index)];
-        if(p)showToast(`Welcome, ${p.name.split(' ')[0]}! It's your turn 🏝`,'success');
-      }else if(token){
-        showToast('This link may have expired — viewing draft','success');
+      showScreen('draftScreen');
+      if(isCancelled()){
+        // Show cancelled state immediately, don't start polling
+        renderBoard();
+      } else {
+        startPoll(draftId);renderBoard();
+        if(token&&isValidTok()){
+          const p=S.participants[pAtIdx(S.draft.current_pick_index)];
+          if(p)showToast(`Welcome, ${p.name.split(' ')[0]}! It's your turn 🏝`,'success');
+        }else if(token){
+          showToast('This link may have expired — viewing draft','success');
+        }
       }
     }catch(e){
       document.getElementById('loadingScreen').style.display='none';
@@ -1864,6 +2032,81 @@ function exportToExcel(){
   showToast('Downloaded! 📊','success');
 }
 
+
+// ── RESEND EMAIL ──
+function showResendModal(){
+  document.getElementById('resendCodeInput').value='';
+  document.getElementById('resendTargetArea').style.display='none';
+  document.getElementById('resendVerifyBtn').style.display='';
+  document.getElementById('resendModal').classList.add('active');
+}
+function closeResendModal(){
+  document.getElementById('resendModal').classList.remove('active');
+}
+
+function verifyResendCode(){
+  const entered=document.getElementById('resendCodeInput').value.trim().toUpperCase();
+  const expected=(S.draft?.cancel_code||'').toUpperCase();
+  if(!entered){showToast('Enter your admin code','error');return;}
+  if(entered!==expected){showToast('Incorrect code','error');return;}
+
+  // Code verified — show participant list
+  document.getElementById('resendVerifyBtn').style.display='none';
+  document.getElementById('resendTargetArea').style.display='';
+  
+  const cpi=S.draft.current_pick_index;
+  const curPIdx=pAtIdx(cpi);
+  const list=document.getElementById('resendList');
+
+  list.innerHTML=S.participants.map((p,pi)=>{
+    if(!p.email)return'';
+    const isCurrent=pi===curPIdx;
+    const label=isCurrent?'Current drafter':'Past participant';
+    const btnLabel=isCurrent?'Resend turn email':'Resend draft link';
+    return `<div class="resend-row">
+      <div class="resend-av" style="background:${p.color||'#888'}">${p.name?.[0]||'?'}</div>
+      <div class="resend-info">
+        <div class="resend-name">${p.name}${isCurrent?' 👈':''}</div>
+        <div class="resend-email">${p.email}</div>
+      </div>
+      <button type="button" class="btn-resend" id="resendBtnP${pi}" onclick="doResend(${pi})">${btnLabel}</button>
+    </div>`;
+  }).join('');
+}
+
+async function doResend(pi){
+  const p=S.participants[pi];
+  if(!p?.email)return;
+  const btn=document.getElementById('resendBtnP'+pi);
+  if(btn){btn.disabled=true;btn.textContent='Sending…';}
+
+  const cpi=S.draft.current_pick_index;
+  const curPIdx=pAtIdx(cpi);
+  const isCurrent=pi===curPIdx;
+
+  if(isCurrent){
+    // Resend current turn email with the active magic link
+    const lnk=buildLink(S.draft);
+    await sendEmail({
+      to:p.email,toName:p.name,
+      subject:`🏝 ${S.draft.name} — Reminder: It's your turn to pick!`,
+      body:buildTurnBody(p,null,null,S.draft,'reminder',lnk),
+    });
+    showToast(`Turn email resent to ${p.name.split(' ')[0]} ✓`,'success');
+  } else {
+    // Resend a general draft link (read-only view — no token)
+    const viewLink=`${CFG.appUrl}?draft=${S.draft.id}`;
+    await sendEmail({
+      to:p.email,toName:p.name,
+      subject:`🏝 ${S.draft.name} — View the Draft`,
+      body:`Hi ${p.name.split(' ')[0]},\n\nHere is a link to view the current state of the ${S.draft.name}.\n\n👉 View draft: ${viewLink}\n\nYou will receive your personal pick link by email when it is your turn.\n\n— ${S.draft.name}`,
+    });
+    showToast(`Draft link sent to ${p.name.split(' ')[0]} ✓`,'success');
+  }
+
+  if(btn){btn.disabled=false;btn.textContent='Sent ✓';btn.style.background='var(--teal)';btn.style.color='white';}
+}
+
 </script>
 <script>
 if ('serviceWorker' in navigator) {
@@ -2020,175 +2263,81 @@ function updateRpBtn(i){
 }
 
 
-// ── CANCEL DRAFT ──
-function showCancelModal(){
-  document.getElementById('cancelCodeInput').value='';
-  document.getElementById('cancelModal').classList.add('active');
+
+
+
+// ── RESEND EMAIL ──
+function showResendModal(){
+  document.getElementById('resendCodeInput').value='';
+  document.getElementById('resendTargetArea').style.display='none';
+  document.getElementById('resendVerifyBtn').style.display='';
+  document.getElementById('resendModal').classList.add('active');
 }
-function closeCancelModal(){
-  document.getElementById('cancelModal').classList.remove('active');
+function closeResendModal(){
+  document.getElementById('resendModal').classList.remove('active');
 }
 
-async function confirmCancel(){
-  const entered=document.getElementById('cancelCodeInput').value.trim().toUpperCase();
+function verifyResendCode(){
+  const entered=document.getElementById('resendCodeInput').value.trim().toUpperCase();
   const expected=(S.draft?.cancel_code||'').toUpperCase();
-  if(!entered){showToast('Enter the cancellation code','error');return;}
-  if(entered!==expected){showToast('Incorrect code — check your admin email','error');return;}
+  if(!entered){showToast('Enter your admin code','error');return;}
+  if(entered!==expected){showToast('Incorrect code','error');return;}
 
-  // Mark draft as cancelled
-  await sb.patch('drafts',`?id=eq.${S.draft.id}`,{
-    launched:false,
-    completion_sent:true, // prevent completion emails
-  });
+  // Code verified — show participant list
+  document.getElementById('resendVerifyBtn').style.display='none';
+  document.getElementById('resendTargetArea').style.display='';
+  
+  const cpi=S.draft.current_pick_index;
+  const curPIdx=pAtIdx(cpi);
+  const list=document.getElementById('resendList');
 
-  // Send cancellation notice to all participants
-  const draftName=S.draft.name;
-  for(const p of S.participants){
-    if(!p?.email)continue;
+  list.innerHTML=S.participants.map((p,pi)=>{
+    if(!p.email)return'';
+    const isCurrent=pi===curPIdx;
+    const label=isCurrent?'Current drafter':'Past participant';
+    const btnLabel=isCurrent?'Resend turn email':'Resend draft link';
+    return `<div class="resend-row">
+      <div class="resend-av" style="background:${p.color||'#888'}">${p.name?.[0]||'?'}</div>
+      <div class="resend-info">
+        <div class="resend-name">${p.name}${isCurrent?' 👈':''}</div>
+        <div class="resend-email">${p.email}</div>
+      </div>
+      <button type="button" class="btn-resend" id="resendBtnP${pi}" onclick="doResend(${pi})">${btnLabel}</button>
+    </div>`;
+  }).join('');
+}
+
+async function doResend(pi){
+  const p=S.participants[pi];
+  if(!p?.email)return;
+  const btn=document.getElementById('resendBtnP'+pi);
+  if(btn){btn.disabled=true;btn.textContent='Sending…';}
+
+  const cpi=S.draft.current_pick_index;
+  const curPIdx=pAtIdx(cpi);
+  const isCurrent=pi===curPIdx;
+
+  if(isCurrent){
+    // Resend current turn email with the active magic link
+    const lnk=buildLink(S.draft);
     await sendEmail({
       to:p.email,toName:p.name,
-      subject:`❌ ${draftName} — Draft Cancelled`,
-      body:`Hi ${p.name.split(' ')[0]},\n\nThe ${draftName} has been cancelled by the administrator.\n\nIf you have questions, please contact your admin directly.\n\n— ${draftName}`,
+      subject:`🏝 ${S.draft.name} — Reminder: It's your turn to pick!`,
+      body:buildTurnBody(p,null,null,S.draft,'reminder',lnk),
     });
-    await sleep(400);
+    showToast(`Turn email resent to ${p.name.split(' ')[0]} ✓`,'success');
+  } else {
+    // Resend a general draft link (read-only view — no token)
+    const viewLink=`${CFG.appUrl}?draft=${S.draft.id}`;
+    await sendEmail({
+      to:p.email,toName:p.name,
+      subject:`🏝 ${S.draft.name} — View the Draft`,
+      body:`Hi ${p.name.split(' ')[0]},\n\nHere is a link to view the current state of the ${S.draft.name}.\n\n👉 View draft: ${viewLink}\n\nYou will receive your personal pick link by email when it is your turn.\n\n— ${S.draft.name}`,
+    });
+    showToast(`Draft link sent to ${p.name.split(' ')[0]} ✓`,'success');
   }
 
-  closeCancelModal();
-  if(S.pollInterval)clearInterval(S.pollInterval);
-  showToast('Draft cancelled. Notifications sent to all participants.','success');
-  setTimeout(()=>showScreen('landingScreen'),2000);
-}
-
-// ── ADMIN LAUNCH EMAIL ──
-function buildAdminLaunchEmail(draft,people,slots){
-  const participantList=people.map((p,i)=>`   ${i+1}. ${p.name}${p.email?' ('+p.email+')':''}`).join('\n');
-  const slotList=slots.map((s,i)=>`   ${i+1}. ${s.label} (${fmtD2(s.start)} – ${fmtD2(s.end)}, max ${s.max} people)`).join('\n');
-
-  return `Hi Admin,
-
-The ${draft.name} has been launched! Here is everything you need to know.
-
-══════════════════════════════════
-HOW THE DRAFT WORKS
-══════════════════════════════════
-
-1. SNAKE ORDER
-   The draft runs in "snake" order. In Round 1, participants pick 1 → ${people.length} in the order listed. In Round 2, it reverses: ${people.length} → 1. Round 3 goes forward again, and so on until all slots are filled or no valid picks remain.
-
-2. MAGIC LINKS
-   Each participant receives a personal email with a unique link when it is their turn. They click the link, see the draft board, and select their vacation period. The link only works for the current drafter — everyone else sees the board in read-only mode.
-
-3. MUTUAL EXCLUSIONS
-   If you set up exclusion groups (e.g. Christmas Week and New Year's Week are mutually exclusive), the system will automatically prevent a participant from selecting more than the allowed number of periods from that group. Blocked slots will appear greyed out when it is their turn.
-
-4. AUTO-SKIP
-   If a participant has no valid picks available (e.g. all remaining slots are either full or blocked by their exclusion choices), the system will automatically skip them and move to the next person. They will not receive a turn email in this case.
-
-5. 24-HOUR REMINDERS
-   If a participant has not made their pick within 24 hours, an automatic reminder email is sent to them and to you.
-
-6. DRAFT COMPLETE
-   When all slots are filled or no one can make any more valid picks, the draft ends automatically. Every participant receives a completion email with their personal selections and the full group schedule.
-
-══════════════════════════════════
-PARTICIPANTS (Draft Order)
-══════════════════════════════════
-
-${participantList}
-
-══════════════════════════════════
-DATE PERIODS
-══════════════════════════════════
-
-${slotList}
-
-══════════════════════════════════
-CANCELLATION CODE (KEEP PRIVATE)
-══════════════════════════════════
-
-If you need to cancel this draft, use the Cancel Draft button on the draft board and enter this code:
-
-   ${draft.cancel_code}
-
-This code is only sent to you. Keep it private.
-
-══════════════════════════════════
-
-View the draft board: ${CFG.appUrl}?draft=${draft.id}
-
-— ${draft.name}`;
-}
-
-
-// ── EXCEL EXPORT ──
-function exportToExcel(){
-  if(!S.draft||!XLSX)return;
-  const wb=XLSX.utils.book_new();
-  const draftName=S.draft.name||'Vacation Draft';
-
-  // ── Sheet 1: Full Schedule ──
-  const schedData=[
-    [draftName + ' — Full Schedule'],
-    ['Generated: '+new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})],
-    [],
-    ['Date Period','Start Date','End Date','Days','Capacity','Who Selected'],
-  ];
-  S.slots.forEach(sl=>{
-    const claimants=S.claims.filter(c=>c.slot_id===sl.id)
-      .sort((a,b)=>a.pick_number-b.pick_number)
-      .map(c=>S.participants[c.participant_index]?.name||'—')
-      .join(', ')||'—';
-    const start=new Date(sl.start_date+'T12:00:00');
-    const end=new Date(sl.end_date+'T12:00:00');
-    const days=Math.round((end-start)/86400000)+1;
-    schedData.push([sl.label,fmtD(sl.start_date),fmtD(sl.end_date),days,sl.max_people,claimants]);
-  });
-  const ws1=XLSX.utils.aoa_to_sheet(schedData);
-  // Column widths
-  ws1['!cols']=[{wch:24},{wch:14},{wch:14},{wch:7},{wch:10},{wch:50}];
-  // Merge title row
-  ws1['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}},{s:{r:1,c:0},e:{r:1,c:5}}];
-  XLSX.utils.book_append_sheet(wb,ws1,'Full Schedule');
-
-  // ── Sheet 2: Per Person Summary ──
-  const personData=[
-    [draftName + ' — Individual Selections'],
-    [],
-    ['#','Name','Email','Selections','Total Picks'],
-  ];
-  S.participants.forEach((p,pi)=>{
-    const myPicks=S.claims.filter(c=>c.participant_index===pi)
-      .sort((a,b)=>a.pick_number-b.pick_number)
-      .map(c=>S.slots.find(s=>s.id===c.slot_id)?.label||'—')
-      .join(', ')||'None';
-    const count=S.claims.filter(c=>c.participant_index===pi).length;
-    personData.push([pi+1,p.name,p.email||'',myPicks,count]);
-  });
-  const ws2=XLSX.utils.aoa_to_sheet(personData);
-  ws2['!cols']=[{wch:5},{wch:22},{wch:30},{wch:60},{wch:12}];
-  ws2['!merges']=[{s:{r:0,c:0},e:{r:0,c:4}}];
-  XLSX.utils.book_append_sheet(wb,ws2,'Individual Selections');
-
-  // ── Sheet 3: Pick History ──
-  const histData=[
-    [draftName + ' — Pick History'],
-    [],
-    ['Pick #','Round','Person','Date Period','Start Date','End Date'],
-  ];
-  S.claims.sort((a,b)=>a.pick_number-b.pick_number).forEach(cl=>{
-    const p=S.participants[cl.participant_index];
-    const sl=S.slots.find(s=>s.id===cl.slot_id);
-    histData.push([cl.pick_number,cl.round_number,p?.name||'—',sl?.label||'—',fmtD(sl?.start_date),fmtD(sl?.end_date)]);
-  });
-  const ws3=XLSX.utils.aoa_to_sheet(histData);
-  ws3['!cols']=[{wch:8},{wch:8},{wch:22},{wch:24},{wch:14},{wch:14}];
-  ws3['!merges']=[{s:{r:0,c:0},e:{r:0,c:5}}];
-  XLSX.utils.book_append_sheet(wb,ws3,'Pick History');
-
-  // Download
-  const filename=draftName.replace(/[^a-zA-Z0-9\s]/g,'').trim().replace(/\s+/g,'-')+'-results.xlsx';
-  XLSX.writeFile(wb,filename);
-  showToast('Downloaded! 📊','success');
+  if(btn){btn.disabled=false;btn.textContent='Sent ✓';btn.style.background='var(--teal)';btn.style.color='white';}
 }
 
 </script>
