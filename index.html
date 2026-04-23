@@ -635,6 +635,7 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
   text-decoration-color:transparent;
 }
 .hiw-link:hover{color:var(--accent);text-decoration-color:var(--accent);}
+
 </style>
 </head>
 <body>
@@ -885,6 +886,7 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
     </div>
   </div>
 </div>
+
 
 <div class="toast" id="toast"><span id="toastMsg">—</span></div>
 <div id="installBanner" style="display:none" class="install-banner">
@@ -1882,20 +1884,128 @@ function buildCompletionHtml(person,pi,isAdmin,draft){
 }
 
 // ── EMAIL ──
+// ── EMAIL QUEUE & RETRY ──
+const emailQueue=[]; // [{to,toName,subject,body,html}]
+let emailRetryTimer=null;
+let adminEmailedAboutFailure=false; // only alert admin once per session
+
 async function sendEmail({to,toName,subject,body,html}){
   if(!to?.includes('@'))return;
   try{
-    console.log('📧 Sending email to',to,'via /api/send-email');
+    console.log('📧 Sending to',to);
     const r=await fetch('/api/send-email',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({to,toName,subject,body,html}),
     });
     const d=await r.json();
-    if(!r.ok){console.error('Email error:',d);showToast('⚠️ Email failed: '+JSON.stringify(d),'error');}
-    else console.log('✅ Email sent to',to);
+    if(!r.ok){
+      const errMsg=d?.error?.message||d?.message||JSON.stringify(d);
+      console.error('❌ Email failed:',errMsg,'(status:'+r.status+')');
+      emailQueue.push({to,toName,subject,body,html});
+      notifyAdminOfEmailFailure(errMsg,to);
+      scheduleNextDayRetry();
+    } else {
+      console.log('✅ Email sent to',to);
+    }
     return d;
-  }catch(e){console.error('Email failed:',e);showToast('⚠️ Email error: '+e.message,'error');}
+  }catch(e){
+    console.error('❌ Email error:',e.message);
+    emailQueue.push({to,toName,subject,body,html});
+    notifyAdminOfEmailFailure(e.message,to);
+    scheduleNextDayRetry();
+  }
+}
+
+async function notifyAdminOfEmailFailure(errMsg,failedRecipient){
+  // Only send one admin alert per session to avoid flooding
+  if(adminEmailedAboutFailure)return;
+  if(!S.draft?.admin_email)return;
+  adminEmailedAboutFailure=true;
+  const isRateLimit=errMsg?.toLowerCase?.().includes('rate')||errMsg?.toLowerCase?.().includes('limit')||errMsg?.includes('429');
+  const reason=isRateLimit
+    ? 'The daily email sending limit has been reached.'
+    : `An email send error occurred: ${errMsg}`;
+  // Send the admin alert via a direct fetch (bypass queue to avoid infinite loop)
+  try{
+    await fetch('/api/send-email',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        to:S.draft.admin_email,
+        toName:'Admin',
+        subject:`⚠️ ${S.draft.name} — Email delivery issue`,
+        body:`Hi Admin,
+
+This is an automated alert from the ${S.draft.name} draft system.
+
+${reason}
+
+An email to ${failedRecipient} could not be delivered, and ${emailQueue.length} email${emailQueue.length!==1?'s are':' is'} queued for retry.
+
+The draft itself is still running normally. Queued emails will be retried automatically at midnight when the daily limit resets.
+
+If this is urgent, you can use the Resend button on the draft board to manually resend the current drafter's pick link.
+
+View the draft: ${CFG.appUrl}?draft=${S.draft.id}
+
+— Vacation Schedule Draft`,
+      }),
+    });
+    console.log('✅ Admin notified of email failure');
+  }catch(e){
+    console.error('Could not notify admin:',e.message);
+  }
+}
+
+function scheduleNextDayRetry(){
+  if(emailRetryTimer)return; // already scheduled
+  // Calculate ms until midnight (when Resend resets the daily limit)
+  const now=new Date();
+  const midnight=new Date(now);
+  midnight.setDate(midnight.getDate()+1);
+  midnight.setHours(0,5,0,0); // 12:05am — small buffer after reset
+  const msUntilMidnight=midnight-now;
+  console.log(`⏱ Email retry scheduled for midnight (${Math.round(msUntilMidnight/60000)} minutes away)`);
+  emailRetryTimer=setTimeout(async()=>{
+    emailRetryTimer=null;
+    adminEmailedAboutFailure=false; // reset so admin gets notified if it fails again
+    await retryQueuedEmails();
+  }, msUntilMidnight);
+}
+
+async function retryQueuedEmails(){
+  if(!emailQueue.length)return;
+  const toRetry=[...emailQueue];
+  emailQueue.length=0;
+  console.log(`🔄 Retrying ${toRetry.length} queued emails...`);
+  let succeeded=0;
+  for(const item of toRetry){
+    await sleep(800);
+    try{
+      const r=await fetch('/api/send-email',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({to:item.to,toName:item.toName,subject:item.subject,body:item.body,html:item.html}),
+      });
+      if(r.ok){succeeded++;console.log('✅ Retry succeeded for',item.to);}
+      else{emailQueue.push(item);console.error('❌ Retry still failing for',item.to);}
+    }catch(e){emailQueue.push(item);}
+  }
+  console.log(`Retry complete: ${succeeded} sent, ${emailQueue.length} still queued`);
+  if(emailQueue.length>0){
+    // Still failing — notify admin and schedule another retry tomorrow
+    notifyAdminOfEmailFailure('Emails are still failing after retry',emailQueue[0].to);
+    scheduleNextDayRetry();
+  }
+}
+
+// Expose for admin resend button (already in header)
+async function retryFailedEmails(){
+  if(!emailQueue.length){showToast('No queued emails','success');return;}
+  showToast(`Retrying ${emailQueue.length} queued email${emailQueue.length!==1?'s':''}…`,'success');
+  await retryQueuedEmails();
+  if(!emailQueue.length)showToast('All emails sent ✓','success');
 }
 
 function buildTurnBody(recipient,picker,slot,draft,ctx,link){
