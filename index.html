@@ -164,6 +164,89 @@ function showHIW(){document.getElementById('hiwOverlay').classList.add('open');}
 function closeHIW(){document.getElementById('hiwOverlay').classList.remove('open');}
 function handleHIWClick(e){if(e.target===document.getElementById('hiwOverlay'))closeHIW();}
 
+
+// ── I'M DONE (permanent opt-out) ──
+function confirmImDone(){
+  const cpi=S.draft?.current_pick_index;
+  if(cpi===undefined)return;
+  const curP=S.participants[pAtIdx(cpi)];
+  if(!curP)return;
+  document.getElementById('imDoneSubtext').textContent=
+    `Are you sure, ${curP.name.split(' ')[0]}? You won't be able to make any more picks and will be skipped in all future rounds. This cannot be undone. Your existing selections will be kept.`;
+  document.getElementById('imDoneModal').classList.add('active');
+}
+
+function closeImDone(){
+  document.getElementById('imDoneModal').classList.remove('active');
+}
+
+async function doImDone(){
+  if(!S.draft||isDone())return;
+  const cpi=S.draft.current_pick_index;
+  const curPIdx=pAtIdx(cpi);
+  const curP=S.participants[curPIdx];
+  closeImDone();
+
+  // Add to opted_out list
+  const optedOut=getOptedOut();
+  if(!optedOut.includes(curPIdx))optedOut.push(curPIdx);
+
+  // Advance to next valid picker
+  let npi=cpi+1;let safety=0;
+  // Temporarily add curPIdx to opted out for advancement check
+  const tempOptedOut=[...optedOut];
+  while(safety<200){
+    const np=pAtIdx(npi);
+    // Check if this person can pick (not opted out, not all slots blocked)
+    if(!tempOptedOut.includes(np)&&S.slots.some(sl=>{
+      const cnt=S.claims.filter(c=>c.slot_id===sl.id).length;
+      const mine=S.claims.some(c=>c.slot_id===sl.id&&c.participant_index===np);
+      return cnt<sl.max_people&&!mine;
+    }))break;
+    npi++;safety++;
+  }
+
+  const newTok=genToken(npi);
+  await sb.patch('drafts',`?id=eq.${S.draft.id}`,{
+    opted_out:JSON.stringify(optedOut),
+    current_pick_index:npi,
+    current_token:newTok,
+    turn_started_at:new Date().toISOString(),
+  });
+
+  await loadState(S.draft.id);
+  renderBoard();
+
+  const done=isDone();
+  if(done){
+    showToast(`${curP.name.split(' ')[0]} has ended their participation. Draft complete! 🎉`,'success');
+  } else {
+    const nxtP=S.participants[pAtIdx(npi)];
+    // Email next person
+    if(nxtP?.email){
+      const lnk=`${CFG.appUrl}?draft=${S.draft.id}&token=${newTok}`;
+      await sendEmail({
+        to:nxtP.email,toName:nxtP.name,
+        subject:`🏝 ${S.draft.name} — It's your turn, ${nxtP.name.split(' ')[0]}!`,
+        body:buildTurnBody(nxtP,curP,null,S.draft,'skip',lnk),
+      });
+    }
+    // Notify admin
+    if(curP.email!==S.draft.admin_email&&nxtP?.email!==S.draft.admin_email){
+      await sendEmail({
+        to:S.draft.admin_email,toName:'Admin',
+        subject:`🏝 ${S.draft.name} — ${curP.name} has ended their participation`,
+        body:`${curP.name} has chosen to end their participation in the ${S.draft.name}. They will be skipped in all future rounds. Their existing selections are kept.
+
+Next up: ${nxtP?.name||'—'}
+
+View: ${CFG.appUrl}?draft=${S.draft.id}`,
+      });
+    }
+    showToast(`${curP.name.split(' ')[0]} has ended their participation. ${nxtP?.name?.split(' ')[0]||'Next person'} is up.`,'success');
+  }
+}
+
 </script>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -636,6 +719,22 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
 }
 .hiw-link:hover{color:var(--accent);text-decoration-color:var(--accent);}
 
+
+/* I'm Done button */
+.btn-im-done{
+  flex:1;padding:9px;border:1px solid var(--danger);
+  border-radius:var(--radius-xs);background:none;color:var(--danger);
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:0.8rem;font-weight:600;
+  cursor:pointer;transition:all 0.2s;
+}
+.btn-im-done:hover{background:var(--danger-light);}
+
+/* Opted out indicator in history */
+.opted-out-badge{
+  font-size:0.65rem;font-weight:700;color:var(--text-dim);
+  background:var(--surface2);border:1px solid var(--border);
+  padding:2px 8px;border-radius:20px;
+}
 </style>
 </head>
 <body>
@@ -731,6 +830,21 @@ input[type="date"]{color-scheme:dark;cursor:pointer;}
     </div>
     <button type="button" class="btn-wiz-next" id="resendVerifyBtn" onclick="verifyResendCode()" style="margin-bottom:10px;">Verify Code →</button>
     <button type="button" class="btn-m-cancel" onclick="closeResendModal()" style="width:100%;">Cancel</button>
+  </div>
+</div>
+
+
+<!-- I'M DONE MODAL -->
+<div class="modal-ov" id="imDoneModal">
+  <div class="cancel-modal-box">
+    <div class="modal-handle"></div>
+    <div class="modal-title">End My Participation</div>
+    <div class="modal-sub" id="imDoneSubtext">Are you sure you want to end your participation? You won't be able to make any more picks and will be skipped in all future rounds. This cannot be undone.</div>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:16px;font-size:0.82rem;color:var(--text-mid);line-height:1.5;">
+      Your existing selections will be kept. Only future picks are affected.
+    </div>
+    <button type="button" class="btn-cancel-confirm" onclick="doImDone()" style="background:var(--danger);margin-bottom:8px;">✋ Yes, I'm done picking</button>
+    <button type="button" class="btn-m-cancel" onclick="closeImDone()" style="width:100%;">Never mind, go back</button>
   </div>
 </div>
 
@@ -1205,6 +1319,7 @@ async function launchDraft(){
       current_pick_index:0,total_picks:0,launched:true,completion_sent:false,
       current_token:genToken(0),turn_started_at:new Date().toISOString(),
       exclusion_groups:'[]',
+      opted_out:'[]',
       cancel_code:'CANCEL-'+genCode(),
     });
 
@@ -1332,7 +1447,16 @@ function isDone(){
   if(S.slots.every(sl=>{const f=S.claims.filter(c=>c.slot_id===sl.id).length;return f>=sl.max_people;}))return true;
   return!S.participants.some((_,pi)=>canP(pi));
 }
+function getOptedOut(){
+  try{return JSON.parse(S.draft?.opted_out||'[]');}catch(e){return[];}
+}
+
+function isOptedOut(pi){
+  return getOptedOut().includes(pi);
+}
+
 function canP(pi){
+  if(isOptedOut(pi))return false;
   return S.slots.some(sl=>{
     const cnt=S.claims.filter(c=>c.slot_id===sl.id).length;
     const mine=S.claims.some(c=>c.slot_id===sl.id&&c.participant_index===pi);
@@ -1484,7 +1608,7 @@ function renderBoard(){
         <div class="t-av" style="background:${curP.color||'#888'}">${curP.name?.[0]||'?'}</div>
         <div><div class="t-name">${curP.name||'—'}</div><div class="t-sub">Round ${rnd} · Pick ${pip} of ${n}</div></div>
       </div>
-      <div class="t-actions"><button class="btn-skip" onclick="skipTurn()">⏭ Skip my turn</button></div>
+      <div class="t-actions"><button class="btn-skip" onclick="skipTurn()">⏭ Skip my turn</button><button type="button" class="btn-im-done" onclick="confirmImDone()">✋ I'm done</button></div>
     </div>${snakeBannerHtml}${onDeckHtml}`;
   }else if(curP){
     const nextPIdx2=pAtIdx(cpi+1);
@@ -2471,6 +2595,89 @@ function showHIW(){document.getElementById('hiwOverlay').classList.add('open');}
 function closeHIW(){document.getElementById('hiwOverlay').classList.remove('open');}
 function handleHIWClick(e){if(e.target===document.getElementById('hiwOverlay'))closeHIW();}
 
+
+// ── I'M DONE (permanent opt-out) ──
+function confirmImDone(){
+  const cpi=S.draft?.current_pick_index;
+  if(cpi===undefined)return;
+  const curP=S.participants[pAtIdx(cpi)];
+  if(!curP)return;
+  document.getElementById('imDoneSubtext').textContent=
+    `Are you sure, ${curP.name.split(' ')[0]}? You won't be able to make any more picks and will be skipped in all future rounds. This cannot be undone. Your existing selections will be kept.`;
+  document.getElementById('imDoneModal').classList.add('active');
+}
+
+function closeImDone(){
+  document.getElementById('imDoneModal').classList.remove('active');
+}
+
+async function doImDone(){
+  if(!S.draft||isDone())return;
+  const cpi=S.draft.current_pick_index;
+  const curPIdx=pAtIdx(cpi);
+  const curP=S.participants[curPIdx];
+  closeImDone();
+
+  // Add to opted_out list
+  const optedOut=getOptedOut();
+  if(!optedOut.includes(curPIdx))optedOut.push(curPIdx);
+
+  // Advance to next valid picker
+  let npi=cpi+1;let safety=0;
+  // Temporarily add curPIdx to opted out for advancement check
+  const tempOptedOut=[...optedOut];
+  while(safety<200){
+    const np=pAtIdx(npi);
+    // Check if this person can pick (not opted out, not all slots blocked)
+    if(!tempOptedOut.includes(np)&&S.slots.some(sl=>{
+      const cnt=S.claims.filter(c=>c.slot_id===sl.id).length;
+      const mine=S.claims.some(c=>c.slot_id===sl.id&&c.participant_index===np);
+      return cnt<sl.max_people&&!mine;
+    }))break;
+    npi++;safety++;
+  }
+
+  const newTok=genToken(npi);
+  await sb.patch('drafts',`?id=eq.${S.draft.id}`,{
+    opted_out:JSON.stringify(optedOut),
+    current_pick_index:npi,
+    current_token:newTok,
+    turn_started_at:new Date().toISOString(),
+  });
+
+  await loadState(S.draft.id);
+  renderBoard();
+
+  const done=isDone();
+  if(done){
+    showToast(`${curP.name.split(' ')[0]} has ended their participation. Draft complete! 🎉`,'success');
+  } else {
+    const nxtP=S.participants[pAtIdx(npi)];
+    // Email next person
+    if(nxtP?.email){
+      const lnk=`${CFG.appUrl}?draft=${S.draft.id}&token=${newTok}`;
+      await sendEmail({
+        to:nxtP.email,toName:nxtP.name,
+        subject:`🏝 ${S.draft.name} — It's your turn, ${nxtP.name.split(' ')[0]}!`,
+        body:buildTurnBody(nxtP,curP,null,S.draft,'skip',lnk),
+      });
+    }
+    // Notify admin
+    if(curP.email!==S.draft.admin_email&&nxtP?.email!==S.draft.admin_email){
+      await sendEmail({
+        to:S.draft.admin_email,toName:'Admin',
+        subject:`🏝 ${S.draft.name} — ${curP.name} has ended their participation`,
+        body:`${curP.name} has chosen to end their participation in the ${S.draft.name}. They will be skipped in all future rounds. Their existing selections are kept.
+
+Next up: ${nxtP?.name||'—'}
+
+View: ${CFG.appUrl}?draft=${S.draft.id}`,
+      });
+    }
+    showToast(`${curP.name.split(' ')[0]} has ended their participation. ${nxtP?.name?.split(' ')[0]||'Next person'} is up.`,'success');
+  }
+}
+
 </script>
 <script>
 if ('serviceWorker' in navigator) {
@@ -2709,6 +2916,89 @@ async function doResend(pi){
 function showHIW(){document.getElementById('hiwOverlay').classList.add('open');}
 function closeHIW(){document.getElementById('hiwOverlay').classList.remove('open');}
 function handleHIWClick(e){if(e.target===document.getElementById('hiwOverlay'))closeHIW();}
+
+
+// ── I'M DONE (permanent opt-out) ──
+function confirmImDone(){
+  const cpi=S.draft?.current_pick_index;
+  if(cpi===undefined)return;
+  const curP=S.participants[pAtIdx(cpi)];
+  if(!curP)return;
+  document.getElementById('imDoneSubtext').textContent=
+    `Are you sure, ${curP.name.split(' ')[0]}? You won't be able to make any more picks and will be skipped in all future rounds. This cannot be undone. Your existing selections will be kept.`;
+  document.getElementById('imDoneModal').classList.add('active');
+}
+
+function closeImDone(){
+  document.getElementById('imDoneModal').classList.remove('active');
+}
+
+async function doImDone(){
+  if(!S.draft||isDone())return;
+  const cpi=S.draft.current_pick_index;
+  const curPIdx=pAtIdx(cpi);
+  const curP=S.participants[curPIdx];
+  closeImDone();
+
+  // Add to opted_out list
+  const optedOut=getOptedOut();
+  if(!optedOut.includes(curPIdx))optedOut.push(curPIdx);
+
+  // Advance to next valid picker
+  let npi=cpi+1;let safety=0;
+  // Temporarily add curPIdx to opted out for advancement check
+  const tempOptedOut=[...optedOut];
+  while(safety<200){
+    const np=pAtIdx(npi);
+    // Check if this person can pick (not opted out, not all slots blocked)
+    if(!tempOptedOut.includes(np)&&S.slots.some(sl=>{
+      const cnt=S.claims.filter(c=>c.slot_id===sl.id).length;
+      const mine=S.claims.some(c=>c.slot_id===sl.id&&c.participant_index===np);
+      return cnt<sl.max_people&&!mine;
+    }))break;
+    npi++;safety++;
+  }
+
+  const newTok=genToken(npi);
+  await sb.patch('drafts',`?id=eq.${S.draft.id}`,{
+    opted_out:JSON.stringify(optedOut),
+    current_pick_index:npi,
+    current_token:newTok,
+    turn_started_at:new Date().toISOString(),
+  });
+
+  await loadState(S.draft.id);
+  renderBoard();
+
+  const done=isDone();
+  if(done){
+    showToast(`${curP.name.split(' ')[0]} has ended their participation. Draft complete! 🎉`,'success');
+  } else {
+    const nxtP=S.participants[pAtIdx(npi)];
+    // Email next person
+    if(nxtP?.email){
+      const lnk=`${CFG.appUrl}?draft=${S.draft.id}&token=${newTok}`;
+      await sendEmail({
+        to:nxtP.email,toName:nxtP.name,
+        subject:`🏝 ${S.draft.name} — It's your turn, ${nxtP.name.split(' ')[0]}!`,
+        body:buildTurnBody(nxtP,curP,null,S.draft,'skip',lnk),
+      });
+    }
+    // Notify admin
+    if(curP.email!==S.draft.admin_email&&nxtP?.email!==S.draft.admin_email){
+      await sendEmail({
+        to:S.draft.admin_email,toName:'Admin',
+        subject:`🏝 ${S.draft.name} — ${curP.name} has ended their participation`,
+        body:`${curP.name} has chosen to end their participation in the ${S.draft.name}. They will be skipped in all future rounds. Their existing selections are kept.
+
+Next up: ${nxtP?.name||'—'}
+
+View: ${CFG.appUrl}?draft=${S.draft.id}`,
+      });
+    }
+    showToast(`${curP.name.split(' ')[0]} has ended their participation. ${nxtP?.name?.split(' ')[0]||'Next person'} is up.`,'success');
+  }
+}
 
 </script>
 </body>
