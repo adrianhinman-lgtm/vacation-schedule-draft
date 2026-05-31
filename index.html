@@ -1038,6 +1038,7 @@ const COLORS=['#d4854a','#4a9e8a','#c9a84c','#7a5ca5','#4a7ab5','#9a5a7a','#4a8a
 
 // ── APP STATE ──
 let S={draft:null,slots:[],participants:[],claims:[],pollInterval:null,pendingSlotId:null};
+let completionFired=false; // in-memory guard — prevents triggerCompletion firing more than once
 
 // ── WIZARD STATE ──
 let W={
@@ -1378,6 +1379,7 @@ async function launchDraft(){
       });
     }
 
+    completionFired=false; // reset for new draft
     showToast('Draft launched! Emails sent 📧','success');
     showScreen('draftScreen');
     startPoll(draft.id);
@@ -1660,7 +1662,7 @@ function renderBoard(){
     return`<div class="hist-item"><div class="hist-av" style="background:${p?.color||'#888'}">${p?.name?.[0]||'?'}</div><div class="hist-info"><div class="hist-name">${p?.name||'—'}</div><div class="hist-slot">${sl?.label||'—'}</div></div><div class="hist-pick">#${c.pick_number}</div></div>`;
   }).join('');}
 
-  if(done&&S.draft&&!S.draft.completion_sent)triggerCompletion();
+  if(done&&S.draft&&!S.draft.completion_sent&&!completionFired)triggerCompletion();
 }
 
 // ── PICK ──
@@ -1799,7 +1801,19 @@ async function skipTurn(){
 
 // ── COMPLETION ──
 async function triggerCompletion(){
+  // Double-guard: in-memory flag + DB flag
+  if(completionFired)return;
+  completionFired=true;
+  // Mark in DB immediately so other sessions/tabs don't also fire
   await sb.patch('drafts',`?id=eq.${S.draft.id}`,{completion_sent:true});
+  // Reload to confirm it saved before sending any emails
+  await loadState(S.draft.id);
+  if(!S.draft.completion_sent){
+    // DB didn't confirm — abort to avoid duplicates
+    console.warn('completion_sent not confirmed in DB — aborting to prevent duplicate emails');
+    completionFired=false;
+    return;
+  }
 
   for(let pi=0;pi<S.participants.length;pi++){
     const p=S.participants[pi];
