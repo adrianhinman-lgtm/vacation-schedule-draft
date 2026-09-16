@@ -4,7 +4,7 @@
 
 const SUPABASE_URL = 'https://fibzznhqgojdoapdnfwp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpYnp6bmhxZ29qZG9hcGRuZndwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MjM5MjMsImV4cCI6MjA5MjA5OTkyM30.waPgUU1JIKVG613yGOk1dY_AThpm2IHaJZSVmJtfTZ4';
-const RESEND_KEY   = 're_XJa9T9MB_2RpWu7xEvGx3v3sunmQEQHvd';
+const RESEND_KEY   = process.env.RESEND_API_KEY || 're_C6Qx2gCi_6TBVq4TpjtqXfEhJVLLkpxWW';
 const FROM_EMAIL   = 'draft@vacationscheduledraft.com';
 const FROM_NAME    = 'Vacation Schedule Draft';
 const APP_URL      = 'https://vacationscheduledraft.com';
