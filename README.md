@@ -1,6 +1,6 @@
 # Vacation Schedule Draft 🏝
 
-A beautiful, mobile-first PWA for running fair snake-order vacation scheduling drafts.
+A beautiful, mobile-first PWA for running fair snake-order vacation scheduling drafts. 
 
 ## Tech Stack
 - **Frontend**: Vanilla JS PWA (no build tools needed)
